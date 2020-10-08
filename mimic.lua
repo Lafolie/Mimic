@@ -82,12 +82,8 @@ inst[3][4] = 0
 
 
 local function splitLabelId(str)
-	local lbl, id = str:match("^(.+)(##.*)")
-	if not lbl then
-		lbl = str
-		id = str
-	end
-	return lbl, id
+	local lbl = str:match("^(.+)##.*") or str
+	return lbl, str
 end
 
 local function clone(tbl)
@@ -136,11 +132,35 @@ end
 -- Rect Helpers
 -------------------------------------------------------------------------------
 
-function mimic:_mkRect()
+--create rect / get rect from cache
+--will also set the dirty flag if the rect state has changed
+function mimic:_mkRect(id, x, y, w, h)
+	--get/make the rect
+	local rect = self.cache[id]
+	if not rect then
+		rect = {x, y, w, h}
+		self.cache[id] = rect
 
+		--this is a new rect, so dirty and return
+		self.liveWindow.instDirty = true
+		return rect
+	end
+
+	--check whether the dirty flag needs to be set
+	if rect[1] == x and rect[2] == y and rect[3] == w and rect[4] == h then
+		return rect
+	end
+
+	rect[1] = x
+	rect[2] = y
+	rect[3] = w
+	rect[4] = h
+
+	self.liveWindow.instDirty = true
+	return rect
 end
 
---add a rect instance to the live window
+--add a rect instance to the live window, and return it
 function mimic:_addRect(rect)
 	local window = self.liveWindow
 	local i = window.instIndex
@@ -172,6 +192,8 @@ function mimic:_addRect(rect)
 		window.instMesh = gfx.newMesh(ATTRIBUTE_TABLE, list, nil, "dynamic")
 		window.instDirty = true
 	end
+
+	return rect
 end
 	
 -------------------------------------------------------------------------------
@@ -220,7 +242,7 @@ end
 
 
 function mimic:windowBegin(str, initOptions)
-	local id, label = splitLabelId(str)
+	local label, id = splitLabelId(str)
 	
 	local window = self.windows[id]
 	if not window then
@@ -235,7 +257,7 @@ function mimic:windowBegin(str, initOptions)
 	self:_addRect(bg)
 
 	for n = 1, 10 do
-		local r = self:_mkWindowHeader(id .. "head" .. n, label, 100, 100 + n * 28)
+		local r = self:_mkRect(id .. "head" .. n, 100, 100 + n * 28, 100, 25)
 		self:_addRect(r)
 	end
 
@@ -246,15 +268,15 @@ end
 
 function mimic:windowEnd()
 	local window = self.liveWindow
+	-- local dirty = window.instDirty
 
-	local dirty = window.instDirty
 	--zero out unused mesh instances
 	for n = window.instIndex , window.instCount do
 		window.instList[n] = ATTRIBUTE_ZERO
 	end
 
 	--refresh mesh if needed
-	if dirty then
+	if window.instDirty then
 		window.instMesh:setVertices(window.instList)
 		window.instDirty = false
 	end
@@ -269,6 +291,12 @@ end
 -------------------------------------------------------------------------------
 -- Controls
 -------------------------------------------------------------------------------
+
+function mimic:rect(str, x, y, w, h)
+	local label, id = splitLabelId(str)
+	local rect = self:_mkRect(id, x, y, w, h)
+	self:_addRect(rect)
+end
 
 return function(id)
 	local inst = setmetatable({}, {__index = mimic})
