@@ -47,15 +47,15 @@ for n=1, BUFFER_INIT_SIZE do
 	BUFFER_INIT_LIST[n] = ATTRIBUTE_ZERO
 end
 
-local pixelcode = [[
-    vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
-    {
-        vec4 texcolor = Texel(tex, texture_coords);
-        return texcolor * color;
-    }
+local GLSL_FRAG = [[
+	vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
+	{
+		vec4 texcolor = Texel(tex, texture_coords);
+		return texcolor * color;
+	}
 ]]
 
-local vertexcode = [[
+local GLSL_VERT = [[
 	attribute vec4 instance;
 
 	vec4 position(mat4 transform_projection, vec4 vertex_position)
@@ -69,17 +69,7 @@ local vertexcode = [[
 	}
 ]]
 
-local uishader = gfx.newShader(pixelcode, vertexcode)
-
-local inst = {}
-for n= 1, 10 do
-	insert(inst, {n * 48, 48, 32, 32})
-end
--- inst[3][1] = 0
--- inst[3][2] = 0
-inst[3][3] = 0
-inst[3][4] = 0
-
+local RECTSHADER = gfx.newShader(GLSL_FRAG, GLSL_VERT)
 
 local function splitLabelId(str)
 	local lbl = str:match("^(.+)##.*") or str
@@ -103,9 +93,6 @@ function mimic:init()
 	self.liveWindow = false --the window currently being modified
 	self.windowStack = {}
 
-	self.attributeMesh = gfx.newMesh(ATTRIBUTE_TABLE, inst)
-	RECT_MESH:attachAttribute("instance", self.attributeMesh, "perinstance")
-
 	self.theme = 
 	{
 		font = gfx.getFont(),
@@ -115,14 +102,13 @@ end
 
 function mimic:draw()
 	-- love.graphics.print(#self.windowStack, 100, 1)
-	gfx.setShader(uishader)
-	-- gfx.drawInstanced(RECT_MESH, 10)
+	gfx.setShader(RECTSHADER)
+
 	for n = #self.windowStack, 1, -1 do
 		local window = self.windowStack[n]
 		RECT_MESH:attachAttribute("instance", window.instMesh, "perinstance")
 		gfx.drawInstanced(RECT_MESH, window.instMax)
 		self.windowStack[n] = nil
-		-- table.remove(self.windowStack, n)
 	end
 	gfx.setShader()
 
