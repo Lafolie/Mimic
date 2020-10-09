@@ -104,23 +104,25 @@ function mimic:init()
 		font = gfx.getFont(),
 		padding = 5,
 
+		textColor = {1, 1, 1, 1},
 		win_bg = {0.1, 0.1, 0.15, 1}
 	}
 end
 
 function mimic:draw()
 	-- love.graphics.print(#self.windowStack, 100, 1)
-	gfx.setShader(RECTSHADER)
-
+	
 	for n = #self.windowStack, 1, -1 do
 		local window = self.windowStack[n]
+		gfx.setShader(RECTSHADER)
 		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
 		RECT_MESH:attachAttribute("instanceColor", window.instMesh, "perinstance")
-
 		gfx.drawInstanced(RECT_MESH, window.instMax)
+		gfx.setShader()
+
+		gfx.draw(window.text)
 		self.windowStack[n] = nil
 	end
-	gfx.setShader()
 
 end
 
@@ -187,13 +189,61 @@ function mimic:_addRect(rect)
 		for n = #list, window.instMax do
 			list[n] = ATTRIBUTE_ZERO
 		end
+		window.instMesh:release()
 		window.instMesh = gfx.newMesh(ATTRIBUTE_TABLE, list, nil, "dynamic")
 		window.instDirty = true
 	end
 
 	return rect
 end
-	
+
+-------------------------------------------------------------------------------
+-- Text Helpers
+-------------------------------------------------------------------------------	
+
+--create text / get text from cache
+--will also set the dirty flag if the text state has changed
+function mimic:_mkText(id, str, x, y)
+	--get/create txt
+	local txt = self.cache[id]
+	if not txt then
+		txt = {str, x, y}
+
+		self.liveWindow.textDirty = true
+		return txt
+	end
+
+	--check whether dirty flag needs to be set
+	if txt[1] == str and txt[2] == x and txt[3] == y then
+		return txt
+	end
+
+	txt[1] = str
+	txt[2] = x
+	txt[3] = y
+
+	self.liveWindow.textDirty = true
+	return txt
+end
+
+--add text to the live window text object, and return it
+function mimic:_addText(txt)
+	local window = self.liveWindow
+	local i = window.textIndex
+	local list = window.textList
+
+	--check to see if we need to set the dirty flag
+	--(whether the draw list differs from last frame)
+	if (not window.textDirty) and list[i] ~= txt then
+		window.textDirty = true
+	end
+
+	list[i] = txt
+	window.textIndex = i + 1
+
+	return txt
+end
+
 -------------------------------------------------------------------------------
 -- Windows
 -------------------------------------------------------------------------------
@@ -213,11 +263,14 @@ function mimic:_mkWindow(id, x, y)
 		instMax = BUFFER_INIT_SIZE,
 		instIndex = 1,
 		instCount = 0,
-		lastInstCount = 0,
 		instDirty = true,
 
 		--text
-		text = gfx.newText(self.theme.font)
+		text = gfx.newText(self.theme.font),
+		textDirty = true,
+		textList = {},
+		textIndex = 1,
+		textCount = 0,
 	}
 
 	self.windows[id] = window
@@ -254,6 +307,9 @@ function mimic:windowBegin(str, initOptions)
 	local bg = self:_mkWindowHeader(id .. "head", label, 100, 100)
 	self:_addRect(bg)
 
+	local txt = self:_mkText(id .. "txt", label, 100, 100)
+	self:_addText(txt)
+
 	for n = 1, 10 do
 		local r = self:_mkRect(id .. "head" .. n, 100, 100 + n * 28, 100, 25)
 		self:_addRect(r)
@@ -266,8 +322,6 @@ end
 
 function mimic:windowEnd()
 	local window = self.liveWindow
-	-- local dirty = window.instDirty
-
 	--zero out unused mesh instances
 	for n = window.instIndex , window.instCount do
 		window.instList[n] = ATTRIBUTE_ZERO
@@ -279,9 +333,23 @@ function mimic:windowEnd()
 		window.instDirty = false
 	end
 
+	--refresh text if needed
+	if window.textDirty then
+		local text = window.text
+		local list = window.textList
+		text:clear()
+		for n = 1, #list do
+			local txt = list[n]
+			text:add(txt[1], txt[2], txt[3])
+		end
+		self.textIdrty = false
+	end
+
 	--cleanup
 	window.instCount = window.instIndex - 1
 	window.instIndex = 1
+	window.textCount = window.textIndex - 1
+	window.textIndex = 1
 	self.liveWindow = false
 end
 
