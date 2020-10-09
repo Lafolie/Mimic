@@ -25,6 +25,20 @@ local mimic = {}
 -------------------------------------------------------------------------------
 -- Constants & private methods
 -------------------------------------------------------------------------------
+
+local DEFAULT_THEME = 
+{
+	font = nil,
+	fontSize = 12,
+	padding = 5,
+
+	textColor = {1, 1, 1, 1},
+	win_bg = {0.1, 0.1, 0.15, 1},
+	win_titleColor = {0.5, 0.5, 0.6, 1},
+	btn_color = {0.15, 0.15, 0.2, 1}
+}
+
+
 local insert, gfx = table.insert, love.graphics
 
 --unit rect
@@ -89,28 +103,48 @@ local function clone(tbl)
 	end
 	return t
 end
+
+-------------------------------------------------------------------------------
+-- Theming
+-------------------------------------------------------------------------------
+
+function mimic:setTheme(theme)
+	theme = theme or DEFAULT_THEME
+	self.theme = theme
+	self:setFont(theme.font, theme.fontSize)
+
+	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
+end
+
+function mimic:setFont(path, size)
+	self.font = path and gfx.newFont(path, size) or gfx.getFont()
+
+	--regenerate text batches
+	for id, window in pairs(self.windows) do
+		window.text:release()
+		window.text = gfx.newText(self.font)
+		window.textDirty = true
+		
+		--in some cases we also need to update the string widths
+		for k, txt in ipairs(window.textList) do
+			txt[4] = self.font:getWidth(txt[1])
+		end
+	end
+
+	self.fontHeight = self.font:getHeight()
+end
+
 -------------------------------------------------------------------------------
 -- Main Callbacks
 -------------------------------------------------------------------------------
 
-function mimic:init()
+function mimic:init(theme)
 	self.cache = setmetatable({}, {__mode = "v"})
 	self.windows = {}
 	self.liveWindow = false --the window currently being modified
 	self.windowStack = {}
 
-	self.theme = 
-	{
-		font = gfx.getFont(),
-		padding = 5,
-
-		textColor = {1, 1, 1, 1},
-		win_bg = {0.1, 0.1, 0.15, 1},
-		win_titleColor = {0.5, 0.5, 0.6, 1},
-		btn_color = {0.15, 0.15, 0.2, 1}
-	}
-
-	self.fontHeight = self.theme.font:getHeight()
+	self:setTheme(theme or DEFAULT_THEME)
 end
 
 function mimic:draw()
@@ -224,9 +258,10 @@ function mimic:_mkText(id, str, x, y)
 	--get/create txt
 	local txt = self.cache[id]
 	if not txt then
-		txt = {str, x, y, self.theme.font:getWidth(str)}
+		txt = {str, x, y, self.font:getWidth(str)}
 		self.cache[id] = txt
 		self.liveWindow.textDirty = true
+
 		return txt
 	end
 
@@ -239,7 +274,7 @@ function mimic:_mkText(id, str, x, y)
 	txt[1] = str
 	txt[2] = x
 	txt[3] = y
-	txt[4] = self.theme.font:getWidth(str)
+	txt[4] = self.font:getWidth(str)
 
 	self.liveWindow.textDirty = true
 	return txt
@@ -290,7 +325,7 @@ function mimic:_mkWindow(id, x, y, w)
 		instDirty = true,
 
 		--text
-		text = gfx.newText(self.theme.font),
+		text = gfx.newText(self.font),
 		textDirty = true,
 		textList = {},
 		textIndex = 1,
@@ -340,7 +375,7 @@ function mimic:windowEnd()
 	--refresh mesh if needed
 	if window.instDirty then
 		--update the bg dimensions first
-		window.h = window.nexty
+		window.h = window.nexty + self.theme.padding
 		window.instList[1][4] = window.h
 
 		--send verts
@@ -397,16 +432,16 @@ function mimic:button(str)
 	local label, id = splitLabelId(str)
 	local x, y = self.liveWindow.nextx, self.liveWindow.nexty
 	local pad = self.theme.padding
-	local font = self.theme.font
+	local font = self.font
 	local height = font:getHeight() + pad * 2
 
 	local txt = self:_mkText(id .. ".txt", label, x + pad * 2, y + pad * 2)
-	local bg = self:_mkRect(id, x + pad, y + pad, font:getWidth(label) + pad * 2, height, self.theme.btn_color)
+	local bg = self:_mkRect(id, x + pad, y + pad, txt[4] + pad * 2, height, self.theme.btn_color)
 
 	self:_addRect(bg)
 	self:_addText(txt)
 
-	self.liveWindow.nexty = self.liveWindow.nexty + height + pad * 2
+	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
 end
 
 function mimic:rect(str, x, y, w, h)
