@@ -38,8 +38,8 @@ local RECT_VERTS =
 
 local RECT_MESH = gfx.newMesh(RECT_VERTS) --mesh to be instanced
 
-local ATTRIBUTE_TABLE = {{"instance", "float", 4}}
-local ATTRIBUTE_ZERO = {0, 0, 0, 0}
+local ATTRIBUTE_TABLE = {{"instanceBody", "float", 4}, {"instanceColor", "float", 4}}
+local ATTRIBUTE_ZERO = {0, 0, 0, 0,    0, 0, 0, 0}
 local BUFFER_INIT_SIZE = 64
 local BUFFER_INIT_LIST = {}
 --fill init tbl with zeros, to be used by new instance meshs
@@ -48,22 +48,28 @@ for n=1, BUFFER_INIT_SIZE do
 end
 
 local GLSL_FRAG = [[
+	varying vec4 passColor;
+
 	vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
 	{
 		vec4 texcolor = Texel(tex, texture_coords);
-		return texcolor * color;
+		return texcolor * passColor;
 	}
 ]]
 
 local GLSL_VERT = [[
-	attribute vec4 instance;
+	attribute vec4 instanceBody;
+	attribute vec4 instanceColor;
+	varying vec4 passColor;
 
 	vec4 position(mat4 transform_projection, vec4 vertex_position)
 	{
-		vertex_position.x *= instance.z;
-		vertex_position.x += instance.x;
-		vertex_position.y *= instance.w;
-		vertex_position.y += instance.y;
+		vertex_position.x *= instanceBody.z;
+		vertex_position.x += instanceBody.x;
+		vertex_position.y *= instanceBody.w;
+		vertex_position.y += instanceBody.y;
+
+		passColor = instanceColor;
 
 		return transform_projection * vertex_position;
 	}
@@ -97,6 +103,8 @@ function mimic:init()
 	{
 		font = gfx.getFont(),
 		padding = 5,
+
+		win_bg = {0.1, 0.1, 0.15, 1}
 	}
 end
 
@@ -106,7 +114,9 @@ function mimic:draw()
 
 	for n = #self.windowStack, 1, -1 do
 		local window = self.windowStack[n]
-		RECT_MESH:attachAttribute("instance", window.instMesh, "perinstance")
+		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
+		RECT_MESH:attachAttribute("instanceColor", window.instMesh, "perinstance")
+
 		gfx.drawInstanced(RECT_MESH, window.instMax)
 		self.windowStack[n] = nil
 	end
@@ -120,11 +130,12 @@ end
 
 --create rect / get rect from cache
 --will also set the dirty flag if the rect state has changed
-function mimic:_mkRect(id, x, y, w, h)
+function mimic:_mkRect(id, x, y, w, h, color)
+	color = color or self.theme.win_bg
 	--get/make the rect
 	local rect = self.cache[id]
 	if not rect then
-		rect = {x, y, w, h}
+		rect = {x, y, w, h, color[1], color[2], color[3], color[4]}
 		self.cache[id] = rect
 
 		--this is a new rect, so dirty and return
@@ -153,6 +164,7 @@ function mimic:_addRect(rect)
 	local list = window.instList
 
 	--check to see if we need to set the dirty flag
+	--(whether the draw list differs from last frame)
 	if (not window.instDirty) and list[i] ~= rect then
 		window.instDirty = true
 	end
@@ -277,6 +289,14 @@ end
 -------------------------------------------------------------------------------
 -- Controls
 -------------------------------------------------------------------------------
+
+function mimic:text(str, ...)
+	if (...) then
+		str = str:format(...)
+	end
+
+	print(str)
+end
 
 function mimic:rect(str, x, y, w, h)
 	local label, id = splitLabelId(str)
