@@ -105,8 +105,12 @@ function mimic:init()
 		padding = 5,
 
 		textColor = {1, 1, 1, 1},
-		win_bg = {0.1, 0.1, 0.15, 1}
+		win_bg = {0.1, 0.1, 0.15, 1},
+		win_titleColor = {0.5, 0.5, 0.6, 1},
+		btn_color = {0.15, 0.15, 0.2, 1}
 	}
+
+	self.fontHeight = self.theme.font:getHeight()
 end
 
 function mimic:draw()
@@ -120,7 +124,7 @@ function mimic:draw()
 		gfx.drawInstanced(RECT_MESH, window.instMax)
 		gfx.setShader()
 
-		gfx.draw(window.text)
+		gfx.draw(window.text, window.x, window.y)
 		self.windowStack[n] = nil
 	end
 
@@ -132,7 +136,13 @@ end
 
 --create rect / get rect from cache
 --will also set the dirty flag if the rect state has changed
+--
+--! X/Y RELVATIVE TO WINDOW !
+--
 function mimic:_mkRect(id, x, y, w, h, color)
+	x = x + self.liveWindow.x
+	y = y + self.liveWindow.y
+
 	color = color or self.theme.win_bg
 	--get/make the rect
 	local rect = self.cache[id]
@@ -194,6 +204,13 @@ function mimic:_addRect(rect)
 		window.instDirty = true
 	end
 
+	-- --expand the window bg if required
+	-- local h = rect[2] - window.y + rect[4]
+	-- if window.h < h then
+	-- 	window.h = h + self.theme.padding
+	-- 	self.instDirty = true
+	-- end
+
 	return rect
 end
 
@@ -207,13 +224,14 @@ function mimic:_mkText(id, str, x, y)
 	--get/create txt
 	local txt = self.cache[id]
 	if not txt then
-		txt = {str, x, y}
-
+		txt = {str, x, y, self.theme.font:getWidth(str)}
+		self.cache[id] = txt
 		self.liveWindow.textDirty = true
 		return txt
 	end
 
 	--check whether dirty flag needs to be set
+	--no need to check [4] as it relies on [1]
 	if txt[1] == str and txt[2] == x and txt[3] == y then
 		return txt
 	end
@@ -221,6 +239,7 @@ function mimic:_mkText(id, str, x, y)
 	txt[1] = str
 	txt[2] = x
 	txt[3] = y
+	txt[4] = self.theme.font:getWidth(str)
 
 	self.liveWindow.textDirty = true
 	return txt
@@ -248,15 +267,20 @@ end
 -- Windows
 -------------------------------------------------------------------------------
 
-function mimic:_mkWindow(id, x, y)
+--internal helper for window creation
+function mimic:_mkWindow(id, x, y, w)
 	local window = 
 	{
 		id = id,
 		x = x,
 		y = y,
-		w = 0,
+		w = w,
 		h = 0,
 		
+		--layout control
+		nextx = 0,
+		nexty = 0,
+
 		--geometry
 		instMesh = gfx.newMesh(ATTRIBUTE_TABLE, BUFFER_INIT_LIST, nil, "dynamic"),
 		instList = clone(BUFFER_INIT_LIST),
@@ -278,59 +302,59 @@ function mimic:_mkWindow(id, x, y)
 	return window
 end
 
-function mimic:_mkWindowHeader(id, label, x, y)
-	local bgid = id .. ".bg"
-	local bg = self.cache[bgid]
-	if not bg then
-		bg = {x, y, 100, 25}
-
-	end
-	self.cache[bgid] = bg
-
-	return bg
-end
-
-
-
 function mimic:windowBegin(str, initOptions)
 	local label, id = splitLabelId(str)
 	
 	local window = self.windows[id]
 	if not window then
-		window = self:_mkWindow(id, initOptions.x, initOptions.y)
+		window = self:_mkWindow(id, initOptions.x, initOptions.y, initOptions.w or 256)
 	end
 
 	self.liveWindow = window
 	insert(self.windowStack, window)
 
 	--construct header and such
-	local bg = self:_mkWindowHeader(id .. "head", label, 100, 100)
+	local bg = self:_mkRect(id, 0, 0, window.w, window.h)
 	self:_addRect(bg)
 
-	local txt = self:_mkText(id .. "txt", label, 100, 100)
+	local pad = self.theme.padding
+	local txt = self:_mkText(id .. ">headtxt", label, pad, pad)
+	local header = self:_mkRect(id .. ">head", 0, 0, window.w, self.fontHeight + pad * 2, self.theme.win_titleColor)
+
+	self:_addRect(header)
 	self:_addText(txt)
 
-	for n = 1, 10 do
-		local r = self:_mkRect(id .. "head" .. n, 100, 100 + n * 28, 100, 25)
-		self:_addRect(r)
-	end
-
-	
-	-- window.instList[self.instIndex] = self:_mkWindowHeader(id)
-	-- self.instIndex = self.instIndex + 1
+	window.nexty = self.fontHeight + pad * 2
 end
 
 function mimic:windowEnd()
 	local window = self.liveWindow
 	--zero out unused mesh instances
-	for n = window.instIndex , window.instCount do
-		window.instList[n] = ATTRIBUTE_ZERO
+	if window.instIndex - 1 ~= window.instCount then
+		for n = window.instIndex , window.instCount do
+			window.instList[n] = ATTRIBUTE_ZERO
+		end
+		window.instDirty = true
 	end
 
 	--refresh mesh if needed
 	if window.instDirty then
+		--update the bg dimensions first
+		window.h = window.nexty
+		window.instList[1][4] = window.h
+
+		--send verts
 		window.instMesh:setVertices(window.instList)
 		window.instDirty = false
+		-- print "rebuilt mesh"
+	end
+
+	--zero out unused text instances
+	if window.textIndex - 1 ~= window.textCount then
+		for n = window.textIndex, window.textCount do
+			window.textList[n] = nil
+		end
+		window.textDirty = true
 	end
 
 	--refresh text if needed
@@ -342,7 +366,8 @@ function mimic:windowEnd()
 			local txt = list[n]
 			text:add(txt[1], txt[2], txt[3])
 		end
-		self.textIdrty = false
+		window.textDirty = false
+		-- print "rebuilt text"
 	end
 
 	--cleanup
@@ -350,6 +375,8 @@ function mimic:windowEnd()
 	window.instIndex = 1
 	window.textCount = window.textIndex - 1
 	window.textIndex = 1
+	window.nextx = 0
+	window.nexty = 0
 	self.liveWindow = false
 end
 
@@ -364,6 +391,22 @@ function mimic:text(str, ...)
 	end
 
 	print(str)
+end
+
+function mimic:button(str)
+	local label, id = splitLabelId(str)
+	local x, y = self.liveWindow.nextx, self.liveWindow.nexty
+	local pad = self.theme.padding
+	local font = self.theme.font
+	local height = font:getHeight() + pad * 2
+
+	local txt = self:_mkText(id .. ".txt", label, x + pad * 2, y + pad * 2)
+	local bg = self:_mkRect(id, x + pad, y + pad, font:getWidth(label) + pad * 2, height, self.theme.btn_color)
+
+	self:_addRect(bg)
+	self:_addText(txt)
+
+	self.liveWindow.nexty = self.liveWindow.nexty + height + pad * 2
 end
 
 function mimic:rect(str, x, y, w, h)
