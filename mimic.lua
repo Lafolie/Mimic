@@ -117,6 +117,11 @@ local CHECK_VERTS =
 
 }
 
+local KEY_UP = 1
+local KEY_RELEASED = 2
+local KEY_DOWN = 3
+local KEY_PRESSED = 4
+
 local function splitLabelId(str)
 	local lbl = str:match("^(.+)##.*") or str
 	return lbl, str
@@ -136,8 +141,7 @@ local function aabb(a, b)
 	return not(x + w < x2 or x2 + w2 < x or y + h < y2 and y + h2 < y)
 end
 
-local function overlaps(px, py, a)
-	local x, y, w, h = a.x, a.y, a.w, a.h
+local function overlaps(px, py, x, y, w, h)
 	return not(px < x or x + w < px or py < y or y + h < py)
 end
 
@@ -151,6 +155,7 @@ function mimic:setTheme(theme)
 	self:setFont(theme.font, theme.fontSize)
 	RECTSHADER:send("bordercolor", theme.borderColor)
 
+	self.titleHeight = self.fontHeight + theme.padding * 2
 	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
 end
 
@@ -187,13 +192,26 @@ function mimic:init(theme)
 	self.activeWindow = false --the window last clicked on
 	self.mousex = 0
 	self.mousey = 0
-	self.mouseButtonLeft = false
-	self.mouseButtonRight = false
+
+	self.oldMouseLeft = KEY_UP
+	self.mouseLeft = KEY_UP
+
+	--dragging
+	self.titleHeight = 0
+	self.dragWindow = false
+	self.dragx = 0
+	self.dragy = 0
 
 	self:setTheme(theme or DEFAULT_THEME)
 end
 
-local check = love.graphics.newMesh(CHECK_VERTS, "strip")
+function mimic:update()
+	if self.oldMouseLeft % 2 == 0 then
+		self.mouseLeft = self.mouseLeft - 1
+	end
+
+	self.oldMouseLeft = self.mouseLeft
+end
 
 function mimic:draw()
 	gfx.clear(self.theme.bg)
@@ -215,6 +233,7 @@ function mimic:draw()
 		-- gfx.print(window.sortingCoef, window.x, window.y-40)
 
 		-- self.windowStack[n] = nil
+		-- love.graphics.print(self.mouseLeft, 1, 300)
 	end
 	-- gfx.push()
 	-- love.graphics.clear()
@@ -229,14 +248,23 @@ end
 function mimic:mousemoved(x, y, dx, dy, istouch)
 	self.mousex = x
 	self.mousey = y
+
+	if self.dragWindow then
+		local window = self.dragWindow
+		window.x = x - self.dragx
+		window.y = y - self.dragy
+		window.instDirty = true
+		window.textDirty = true
+	end
 end
 
 function mimic:mousepressed(x, y, btn, istouch, presses)
 	local count = #self.windowStack
 	for n = count, 1, -1 do
 		local window = self.windowStack[n]
-		if overlaps(x, y, window) then
+		if overlaps(x, y, window.x, window.y, window.w, window.h) then
 			window.z = count + 1
+			self.activeWindow = window
 			goto done
 		end
 	end
@@ -244,9 +272,17 @@ function mimic:mousepressed(x, y, btn, istouch, presses)
 	::done::
 	self:_sortWindowStack()
 
+	if btn == 1 then
+		self.mouseLeft = KEY_PRESSED
+	end
 end
 
-function mimic:mousereleased(x, y, button, istouch, presses)
+function mimic:mousereleased(x, y, btn, istouch, presses)
+	if btn == 1 then
+		self.mouseLeft = KEY_RELEASED
+
+		self.dragWindow = false
+	end
 end
 
 function mimic:wheelmoved(x, y)
@@ -449,6 +485,23 @@ function mimic:windowBegin(str, initOptions)
 	end
 	self.liveWindow = window
 
+	--mouse interactions
+	local mx, my = self.mousex, self.mousey
+	if self.mouseLeft == KEY_PRESSED and window == self.activeWindow and overlaps(mx, my, window.x, window.y, window.w, self.titleHeight) then
+		self.dragx = mx - window.x
+		self.dragy = my - window.y
+		self.dragWindow = window
+	end
+
+
+
+	-- 	window.x = self.mousex - 150
+	-- 	window.y = self.mousey - 10
+
+	-- 	window.instDirty = true
+	-- 	window.textDirty = true
+	-- end
+
 	--construct header and such
 	local bg = self:_mkRect(id, 0, 0, window.w, window.h)
 	self:_addRect(bg)
@@ -461,6 +514,7 @@ function mimic:windowBegin(str, initOptions)
 	self:_addText(txt)
 
 	window.nexty = self.fontHeight + pad * 2
+	
 end
 
 function mimic:windowEnd()
@@ -482,7 +536,7 @@ function mimic:windowEnd()
 		--send verts
 		window.instMesh:setVertices(window.instList)
 		window.instDirty = false
-		-- print "rebuilt mesh"
+		print "rebuilt mesh"
 	end
 
 	--zero out unused text instances
