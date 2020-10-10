@@ -34,6 +34,7 @@ local DEFAULT_THEME =
 
 	bg = {0.05, 0.05, 0.1},
 	textColor = {1, 1, 1, 1},
+	borderColor = {0.5, 0.5, 0.6, 1},
 	win_bg = {0.1, 0.1, 0.15, 1},
 	win_titleColor = {0.5, 0.5, 0.6, 1},
 	btn_color = {0.15, 0.15, 0.2, 1}
@@ -63,19 +64,31 @@ for n=1, BUFFER_INIT_SIZE do
 end
 
 local GLSL_FRAG = [[
-	varying vec4 passColor;
+	uniform vec4 bordercolor;
+	varying vec4 passcolor;
 
 	vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
 	{
 		vec4 texcolor = Texel(tex, texture_coords);
-		return texcolor * passColor;
+		texcolor *= passcolor;
+
+		// thanks to a13X_B for the help with this
+		float du = dFdx(texture_coords.x);
+		bool is_in_border = texture_coords.x > du && texture_coords.x < (1. - du);
+		texcolor = mix(texcolor, bordercolor, 1. -float(is_in_border));
+
+		float dv = dFdy(-texture_coords.y);
+		is_in_border = texture_coords.y > dv && texture_coords.y < (1. - dv);
+		texcolor = mix(texcolor, bordercolor, 1. -float(is_in_border));
+
+		return texcolor;
 	}
-]]
+]]	
 
 local GLSL_VERT = [[
 	attribute vec4 instanceBody;
 	attribute vec4 instanceColor;
-	varying vec4 passColor;
+	varying vec4 passcolor;
 
 	vec4 position(mat4 transform_projection, vec4 vertex_position)
 	{
@@ -84,7 +97,7 @@ local GLSL_VERT = [[
 		vertex_position.y *= instanceBody.w;
 		vertex_position.y += instanceBody.y;
 
-		passColor = instanceColor;
+		passcolor = instanceColor;
 
 		return transform_projection * vertex_position;
 	}
@@ -136,6 +149,7 @@ function mimic:setTheme(theme)
 	theme = theme or DEFAULT_THEME
 	self.theme = theme
 	self:setFont(theme.font, theme.fontSize)
+	RECTSHADER:send("bordercolor", theme.borderColor)
 
 	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
 end
@@ -194,8 +208,11 @@ function mimic:draw()
 		gfx.setShader()
 
 		gfx.draw(window.text, window.x, window.y)
-		gfx.print(window.z, window.x, window.y-20)
-		gfx.print(window.sortingCoef, window.x, window.y-40)
+		-- love.graphics.setLineWidth(0.5)
+		-- gfx.setColor(self.theme.win_titleColor)
+		-- gfx.rectangle("line", window.x+0.5, window.y+0.5, window.w-1, window.h-1)
+		-- gfx.print(window.z, window.x, window.y-20)
+		-- gfx.print(window.sortingCoef, window.x, window.y-40)
 
 		-- self.windowStack[n] = nil
 	end
