@@ -32,6 +32,7 @@ local DEFAULT_THEME =
 	fontSize = 12,
 	padding = 5,
 
+	bg = {0.05, 0.05, 0.1},
 	textColor = {1, 1, 1, 1},
 	win_bg = {0.1, 0.1, 0.15, 1},
 	win_titleColor = {0.5, 0.5, 0.6, 1},
@@ -91,6 +92,18 @@ local GLSL_VERT = [[
 
 local RECTSHADER = gfx.newShader(GLSL_FRAG, GLSL_VERT)
 
+local CHECK_VERTS = 
+{
+	{0.125,0.6, 0,0.75, 1,1,1,1},
+	{0,0.75, 0,0.75, 1,1,1,1},
+	{0.25,0.75, 0,0.75, 1,1,1,1},
+	{0.25,1, 0,0.75, 1,1,1,1},
+	{1,0.25, 0,0.75, 1,1,1,1},
+	{0.9,0.1, 0,0.75, 1,1,1,1},
+	{0.25,0.75, 0,0.75, 1,1,1,1},
+
+}
+
 local function splitLabelId(str)
 	local lbl = str:match("^(.+)##.*") or str
 	return lbl, str
@@ -102,6 +115,17 @@ local function clone(tbl)
 		t[k] = v
 	end
 	return t
+end
+
+local function aabb(a, b)
+	local x, y, w, h = a.x, a.y, a.w, a.h
+	local x2, y2, w2, h2 = b.x, b.y, b.w, b.h
+	return not(x + w < x2 or x2 + w2 < x or y + h < y2 and y + h2 < y)
+end
+
+local function overlaps(px, py, a)
+	local x, y, w, h = a.x, a.y, a.w, a.h
+	return not(px < x or x + w < px or py < y or y + h < py)
 end
 
 -------------------------------------------------------------------------------
@@ -127,7 +151,7 @@ function mimic:setFont(path, size)
 		
 		--in some cases we also need to update the string widths
 		for k, txt in ipairs(window.textList) do
-			txt[4] = self.font:getWidth(txt[1])
+			txt[4] = self.font:getWidth(txt[1][2])
 		end
 	end
 
@@ -142,15 +166,26 @@ function mimic:init(theme)
 	self.cache = setmetatable({}, {__mode = "v"})
 	self.windows = {}
 	self.liveWindow = false --the window currently being modified
-	self.windowStack = {}
+	self.windowStack = {} --sorted list used for drawing
+	self.windowStackMap = {} --LUT used to avoid looping over windowStack
+	
+	--input
+	self.activeWindow = false --the window last clicked on
+	self.mousex = 0
+	self.mousey = 0
+	self.mouseButtonLeft = false
+	self.mouseButtonRight = false
 
 	self:setTheme(theme or DEFAULT_THEME)
 end
 
+local check = love.graphics.newMesh(CHECK_VERTS, "strip")
+
 function mimic:draw()
+	gfx.clear(self.theme.bg)
 	-- love.graphics.print(#self.windowStack, 100, 1)
 	
-	for n = #self.windowStack, 1, -1 do
+	for n = 1, #self.windowStack do
 		local window = self.windowStack[n]
 		gfx.setShader(RECTSHADER)
 		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
@@ -159,9 +194,45 @@ function mimic:draw()
 		gfx.setShader()
 
 		gfx.draw(window.text, window.x, window.y)
-		self.windowStack[n] = nil
+		gfx.print(window.z, window.x, window.y-20)
+		gfx.print(window.sortingCoef, window.x, window.y-40)
+
+		-- self.windowStack[n] = nil
+	end
+	-- gfx.push()
+	-- love.graphics.clear()
+	-- gfx.rotate(0.7853981634)
+	-- gfx.rectangle("fill", 100, 0, 80, 40)
+	-- gfx.rotate(-0.7853981634 * 2)
+	-- gfx.rectangle("fill", 0, 140, 160, 40)
+	-- -- gfx.draw(check, 1, 1)
+	-- gfx.pop()
+end
+
+function mimic:mousemoved(x, y, dx, dy, istouch)
+	self.mousex = x
+	self.mousey = y
+end
+
+function mimic:mousepressed(x, y, btn, istouch, presses)
+	local count = #self.windowStack
+	for n = count, 1, -1 do
+		local window = self.windowStack[n]
+		if overlaps(x, y, window) then
+			window.z = count + 1
+			goto done
+		end
 	end
 
+	::done::
+	self:_sortWindowStack()
+
+end
+
+function mimic:mousereleased(x, y, button, istouch, presses)
+end
+
+function mimic:wheelmoved(x, y)
 end
 
 -------------------------------------------------------------------------------
@@ -254,11 +325,13 @@ end
 
 --create text / get text from cache
 --will also set the dirty flag if the text state has changed
-function mimic:_mkText(id, str, x, y)
+function mimic:_mkText(id, str, x, y, color)
+	color = color or self.theme.textColor
+
 	--get/create txt
 	local txt = self.cache[id]
 	if not txt then
-		txt = {str, x, y, self.font:getWidth(str)}
+		txt = {{color, str}, x, y, self.font:getWidth(str)}
 		self.cache[id] = txt
 		self.liveWindow.textDirty = true
 
@@ -267,7 +340,7 @@ function mimic:_mkText(id, str, x, y)
 
 	--check whether dirty flag needs to be set
 	--no need to check [4] as it relies on [1]
-	if txt[1] == str and txt[2] == x and txt[3] == y then
+	if txt[1][2] == str and txt[2] == x and txt[3] == y then
 		return txt
 	end
 
@@ -311,6 +384,8 @@ function mimic:_mkWindow(id, x, y, w)
 		y = y,
 		w = w,
 		h = 0,
+		z = 1,
+		sortingCoef = 0,
 		
 		--layout control
 		nextx = 0,
@@ -345,8 +420,17 @@ function mimic:windowBegin(str, initOptions)
 		window = self:_mkWindow(id, initOptions.x, initOptions.y, initOptions.w or 256)
 	end
 
+	window.sortingCoef = initOptions.alwaysOnTop and 1 or 0
+	window.sortingCoef = initOptions.alwaysOnBottom and -1 or window.sortingCoef
+
+	if not self.windowStackMap[id] then
+		self.windowStackMap[id] = window
+		insert(self.windowStack, window)
+		window.z = #self.windowStack
+		self:_sortWindowStack()
+		self.activeWindow = window
+	end
 	self.liveWindow = window
-	insert(self.windowStack, window)
 
 	--construct header and such
 	local bg = self:_mkRect(id, 0, 0, window.w, window.h)
@@ -415,6 +499,25 @@ function mimic:windowEnd()
 	self.liveWindow = false
 end
 
+function mimic:_sortWindowStack()
+	local count = #self.windowStack
+	table.sort(self.windowStack, function(a, b)
+		local offa, offb = 0, 0
+		if a.sortingCoef ~= 0 and a.sortingCoef == b.sortingCoef then
+			if self.activeWindow == a then
+				offa = 1
+			else
+				offb = 1
+			end
+		end
+
+		return a.z + offa + count * a.sortingCoef < b.z + offb + count * b.sortingCoef
+	end)
+
+	for k, v in ipairs(self.windowStack) do
+		v.z = k
+	end
+end
 
 -------------------------------------------------------------------------------
 -- Controls
