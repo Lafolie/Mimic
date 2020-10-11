@@ -667,12 +667,12 @@ end
 function mimic:button(str)
 	local clicked
 	local label, id = splitLabelId(str)
-	local x, y = self.liveWindow.nextx, self.liveWindow.nexty
 	local pad = self.theme.padding
+	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
 	local height = self.fontHeight + pad * 2
 
 	--text is static, and we need it's width first
-	local txt = self:_mkText(id .. ".txt", label, x + pad * 2, y + pad * 2)
+	local txt = self:_mkText(id .. ".txt", label, x + pad, y + pad)
 	local width = txt[4] + pad * 2
 	
 	--mouse interactions
@@ -694,7 +694,7 @@ function mimic:button(str)
 	end
 	
 	--now we can create the button rect
-	local bg = self:_mkRect(id, x + pad, y + pad, width, height, color)
+	local bg = self:_mkRect(id, x, y, width, height, color)
 
 	self:_addRect(bg)
 	self:_addText(txt)
