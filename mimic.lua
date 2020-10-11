@@ -416,7 +416,7 @@ function mimic:draw()
 		gfx.draw(window.text)
 		love.graphics.pop()
 
-		gfx.draw(self.atlas, 100, 100)
+		gfx.draw(self.atlas, 0, 100)
 		-- love.graphics.setLineWidth(0.5)
 		-- gfx.setColor(self.theme.win_titleColor)
 		-- gfx.rectangle("line", window.x+0.5, window.y+0.5, window.w-1, window.h-1)
@@ -442,8 +442,9 @@ function mimic:mousemoved(x, y, dx, dy, istouch)
 
 	if self.dragWindow then
 		local window = self.dragWindow
-		window.x = x - self.dragx
-		window.y = y - self.dragy
+		local w, h = gfx.getDimensions()
+		window.x = math.max(-window.w + 16, math.min(x - self.dragx, w - 16))
+		window.y = math.max(0, math.min(y - self.dragy, h - 16))
 	end
 end
 
