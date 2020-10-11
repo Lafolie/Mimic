@@ -20,6 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ]]
 
+--we only support Löve 11.3 upwards
+assert(love.getVersion() >= 11, "Mimic Error: Incompatible Löve version. Version 11.3+ is required to use this library.")
+
 local mimic = {}
 
 -------------------------------------------------------------------------------
@@ -42,6 +45,7 @@ local DEFAULT_THEME =
 	btn_hover = {0.25, 0.25, 0.4, 1}
 }
 
+local MIMIC_VERSION = "0.1"
 
 local insert, gfx = table.insert, love.graphics
 
@@ -176,6 +180,7 @@ function mimic:_setTheme(theme)
 	RECTSHADER:send("bordercolor", theme.borderColor)
 
 	self.titleHeight = self.fontHeight + theme.padding * 2
+	self:_buildAtlas()
 	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
 end
 
@@ -197,6 +202,123 @@ function mimic:_setFont(path, size)
 	self.fontHeight = self.font:getHeight()
 end
 
+function mimic:_buildAtlas()
+	local radius = self.fontHeight + self.theme.padding
+	local rot = 0.7853981634
+	local push, pop = gfx.push, gfx.pop
+	local size = self.fontHeight
+	local dimensions = size * 3
+	local canvas = gfx.newCanvas(dimensions, dimensions)
+
+	--[[
+		checkbox
+		radio
+		tri
+		X
+	]]
+
+	-- local size = (self.theme.fontSize) * 1
+
+	gfx.setCanvas(canvas)
+		gfx.clear(0.1, 0.1, 0.1, 1)
+	push()
+
+	--begin checkbox
+	gfx.setColor(0.05, 0.05, 0.05)
+	gfx.scale(size)
+	gfx.translate(1, 0)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+	--draw the checkbox check
+	--wtf, but it works
+	push()
+		gfx.translate(0.2, 0.5)
+		gfx.rotate(rot)
+		gfx.setColor(1, 1, 1, 1)
+		gfx.rectangle("fill", 0, 0, 0.25, 0.2)
+
+		gfx.rotate(-rot)
+		gfx.translate(0, 0.28)
+		gfx.rotate(-rot)
+		gfx.rectangle("fill", 0, 0, 0.85, 0.2)
+	pop()
+
+	--draw the radio empty
+	gfx.translate(1, 0)
+	gfx.setColor(0.05, 0.05, 0.05)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+
+	gfx.setColor(0, 0, 0, 1)
+	gfx.circle("fill", 0.5, 0.5, 0.45)
+	gfx.setColor(1, 1, 1, 1)
+	gfx.setLineWidth(0.5/size)
+	gfx.circle("line", 0.5, 0.5, 0.45)
+	gfx.setLineWidth(1)
+
+	--draw the radio full
+	gfx.translate(-3, 1)
+	gfx.setColor(0.05, 0.05, 0.05)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+	
+	gfx.setColor(0, 0, 0, 1)
+	gfx.circle("fill", 0.5, 0.5, 0.45)
+	gfx.setColor(1, 1, 1, 1)
+	gfx.setLineWidth(0.5/size)
+	gfx.circle("line", 0.5, 0.5, 0.45)
+	gfx.setLineWidth(1)
+
+	gfx.setColor(1, 1, 1, 1)
+	gfx.circle("fill", 0.5, 0.5, 0.275)
+
+	--draw the right tri
+	gfx.translate(1, 0)
+	gfx.setColor(0.05, 0.05, 0.05)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+
+	gfx.setColor(1, 1, 1, 1)
+	gfx.polygon("fill", 0.1, 0.1, 0.1, 0.9, 0.9, 0.5)
+
+	--draw the down tri
+	gfx.translate(1, 0)
+	gfx.setColor(0.05, 0.05, 0.05)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+
+	gfx.setColor(1, 1, 1, 1)
+	gfx.polygon("fill", 0.1, 0.1, 0.9, 0.1, 0.5, 0.9)
+
+	--draw the x
+	gfx.translate(1, 0)
+	gfx.setColor(0.05, 0.05, 0.05)
+	-- gfx.rectangle("fill", 0, 0, 1, 1)
+
+	gfx.setColor(1, 1, 1, 1)
+	gfx.polygon("fill", 0.25, 0.1, 0.9, 0.75, 0.75, 0.9, 0.1, 0.25)
+	gfx.polygon("fill", 0.1, 0.75, 0.75, 0.1, 0.9, 0.25, 0.25, 0.9)
+
+	--end operations
+	pop()
+	gfx.setCanvas()
+	
+	self.atlas = gfx.newImage(canvas:newImageData())
+	canvas:release()
+
+	--generate quads
+	local quads = {}
+	for y = 0, 3 do
+		local yy = y * size
+		for x = 0, 3 do
+			local quad = gfx.newQuad(x * size, yy, size, size, dimensions, dimensions)
+			insert(quads, quad)
+		end
+	end
+	self.atlasQuads = quads
+end
+
+function mimic:_regenSpriteBatches()
+	for _, window in ipairs(self.windows) do
+		-- window.
+	end
+end
+
 -------------------------------------------------------------------------------
 -- Main Callbacks
 -------------------------------------------------------------------------------
@@ -207,7 +329,7 @@ function mimic:init(theme)
 	self.liveWindow = false --the window currently being modified
 	self.windowStack = {} --sorted list used for drawing
 	self.windowStackMap = {} --LUT used to avoid looping over windowStack
-	
+
 	--input
 	self.hoverWindow = false --the upper-most (z) window the mouse is over
 	self.activeWindow = false --the window last clicked on
@@ -293,6 +415,8 @@ function mimic:draw()
 
 		gfx.draw(window.text)
 		love.graphics.pop()
+
+		gfx.draw(self.atlas, 100, 100)
 		-- love.graphics.setLineWidth(0.5)
 		-- gfx.setColor(self.theme.win_titleColor)
 		-- gfx.rectangle("line", window.x+0.5, window.y+0.5, window.w-1, window.h-1)
@@ -438,7 +562,7 @@ end
 
 -------------------------------------------------------------------------------
 -- Text Helpers
--------------------------------------------------------------------------------	
+-------------------------------------------------------------------------------
 
 --create text / get text from cache
 --will also set the dirty flag if the text state has changed
@@ -489,6 +613,24 @@ function mimic:_addText(txt)
 end
 
 -------------------------------------------------------------------------------
+-- Quad Helpers
+-------------------------------------------------------------------------------
+
+function mimic:_mkQuad(id, spr, x, y)
+	local quad = self.cache[id]
+	if not quad then
+		quad = {bleh, x, y}
+	end
+
+	return quad
+end
+
+function mimic:_addQuad()
+	local window = self.liveWindow
+
+end
+
+-------------------------------------------------------------------------------
 -- Windows
 -------------------------------------------------------------------------------
 
@@ -522,6 +664,13 @@ function mimic:_mkWindow(id, x, y, w)
 		textList = {},
 		textIndex = 1,
 		textCount = 0,
+
+		--quads
+		spriteBatch = gfx.newSpriteBatch(self.atlas, 99),
+		quadList = {},
+		quadDirty = false,
+		quadIndex = 1,
+		quadCount = 0
 	}
 
 	self.windows[id] = window
@@ -598,7 +747,7 @@ function mimic:windowEnd()
 		--send verts
 		window.instMesh:setVertices(window.instList)
 		window.instDirty = false
-		-- print "rebuilt mesh"
+		print "rebuilt mesh"
 	end
 
 	--zero out unused text instances
@@ -619,7 +768,7 @@ function mimic:windowEnd()
 			text:add(txt[1], txt[2], txt[3])
 		end
 		window.textDirty = false
-		-- print "rebuilt text"
+		print "rebuilt text"
 	end
 
 	--cleanup
@@ -677,7 +826,7 @@ function mimic:button(str)
 	local height = self.fontHeight + pad * 2
 
 	--text is static, and we need it's width first
-	local txt = self:_mkText(id .. ".txt", label, x + pad, y + pad)
+	local txt = self:_mkText(id .. ">txt", label, x + pad, y + pad)
 	local width = txt[4] + pad * 2
 	
 	--mouse interactions
