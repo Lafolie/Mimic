@@ -37,7 +37,9 @@ local DEFAULT_THEME =
 	borderColor = {0.5, 0.5, 0.6, 1},
 	win_bg = {0.1, 0.1, 0.15, 1},
 	win_titleColor = {0.5, 0.5, 0.6, 1},
-	btn_color = {0.15, 0.15, 0.2, 1}
+	win_close = {0.9, 0.1, 0.4, 1},
+	btn_color = {0.15, 0.15, 0.2, 1},
+	btn_hover = {0.25, 0.25, 0.4, 1}
 }
 
 
@@ -195,8 +197,12 @@ function mimic:init(theme)
 	self.windowStackMap = {} --LUT used to avoid looping over windowStack
 	
 	--input
+	self.hoverWindow = false --the upper-most (z) window the mouse is over
 	self.activeWindow = false --the window last clicked on
-	self.mousex = 0
+	self.activeControl = false --the control under the mouse during a press
+	self.absoluteMousex = 0 --window-space mouse
+	self.absoluteMousey = 0
+	self.mousex = 0 --adjusted mouse, relative to liveWindow
 	self.mousey = 0
 
 	self.oldMouseLeft = KEY_UP
@@ -215,8 +221,34 @@ function mimic:update()
 	if self.oldMouseLeft % 2 == 0 then
 		self.mouseLeft = self.mouseLeft - 1
 	end
+	if self.oldMouseLeft == KEY_RELEASED then
+		self.activeControl = false
+	end
 
 	self.oldMouseLeft = self.mouseLeft
+
+	--update active window
+	local count = #self.windowStack
+	local hover = false
+	local x, y = self.absoluteMousex, self.absoluteMousey
+	for n = count, 1, -1 do
+		local window = self.windowStack[n]
+		if overlaps(x, y, window.x, window.y, window.w, window.h) then
+			hover = not hover and window or hover
+			if self.mouseLeft == KEY_PRESSED then
+				window.z = count + 1
+				self.activeWindow = window
+				goto done
+			end
+		end
+	end
+	goto skipsort
+
+	::done::
+	self:_sortWindowStack()
+
+	::skipsort::
+	self.hoverWindow = hover
 end
 
 function mimic:draw()
@@ -257,8 +289,8 @@ function mimic:draw()
 end
 
 function mimic:mousemoved(x, y, dx, dy, istouch)
-	self.mousex = x
-	self.mousey = y
+	self.absoluteMousex = x
+	self.absoluteMousey = y
 
 	if self.dragWindow then
 		local window = self.dragWindow
@@ -308,8 +340,6 @@ end
 --
 function mimic:_mkRect(id, x, y, w, h, color, border)
 	border = border and 1 or 0
-	-- x = x + self.liveWindow.x
-	-- y = y + self.liveWindow.y
 
 	color = color or self.theme.win_bg
 	--get/make the rect
@@ -334,6 +364,11 @@ function mimic:_mkRect(id, x, y, w, h, color, border)
 	rect[2] = y
 	rect[3] = w
 	rect[4] = h
+	rect[5] = color[1]
+	rect[6] = color[2]
+	rect[7] = color[3]
+	rect[8] = color[4]
+	rect[9] = border
 
 	self.liveWindow.instDirty = true
 	return rect
@@ -373,13 +408,6 @@ function mimic:_addRect(rect)
 		window.instMesh = gfx.newMesh(ATTRIBUTE_TABLE, list, nil, "dynamic")
 		window.instDirty = true
 	end
-
-	-- --expand the window bg if required
-	-- local h = rect[2] - window.y + rect[4]
-	-- if window.h < h then
-	-- 	window.h = h + self.theme.padding
-	-- 	self.instDirty = true
-	-- end
 
 	return rect
 end
@@ -498,21 +526,14 @@ function mimic:windowBegin(str, initOptions)
 	self.liveWindow = window
 
 	--mouse interactions
-	local mx, my = self.mousex, self.mousey
+	local mx, my = self.absoluteMousex, self.absoluteMousey
+	self.mousex, self.mousey = mx - window.x, my - window.y
+
 	if self.mouseLeft == KEY_PRESSED and window == self.activeWindow and overlaps(mx, my, window.x, window.y, window.w, self.titleHeight) then
 		self.dragx = mx - window.x
 		self.dragy = my - window.y
 		self.dragWindow = window
 	end
-
-
-
-	-- 	window.x = self.mousex - 150
-	-- 	window.y = self.mousey - 10
-
-	-- 	window.instDirty = true
-	-- 	window.textDirty = true
-	-- end
 
 	--construct header and such
 	local bg = self:_mkRect(id, 0, 0, window.w, window.h, nil, true)
@@ -522,11 +543,16 @@ function mimic:windowBegin(str, initOptions)
 	local txt = self:_mkText(id .. ">headtxt", label, pad, pad)
 	local header = self:_mkRect(id .. ">head", 0, 0, window.w, self.fontHeight + pad * 2, self.theme.win_titleColor)
 
+	local closebg = self:_mkRect(id ..">close", window.w-32 - pad, 0, 33, self.fontHeight + pad, self.theme.win_close)
+	local closetxt = self:_mkText(id .. ">closttxt", "X", window.w-26, pad * 0.5)
+
 	self:_addRect(header)
 	self:_addText(txt)
+	self:_addRect(closebg)
+	self:_addText(closetxt)
+
 
 	window.nexty = self.fontHeight + pad * 2
-	
 end
 
 function mimic:windowEnd()
@@ -615,19 +641,43 @@ function mimic:text(str, ...)
 end
 
 function mimic:button(str)
+	local clicked
 	local label, id = splitLabelId(str)
 	local x, y = self.liveWindow.nextx, self.liveWindow.nexty
 	local pad = self.theme.padding
-	local font = self.font
-	local height = font:getHeight() + pad * 2
+	local height = self.fontHeight + pad * 2
 
+	--text is static, and we need it's width first
 	local txt = self:_mkText(id .. ".txt", label, x + pad * 2, y + pad * 2)
-	local bg = self:_mkRect(id, x + pad, y + pad, txt[4] + pad * 2, height, self.theme.btn_color)
+	local width = txt[4] + pad * 2
+	
+	--mouse interactions
+	local color = self.theme.btn_color
+	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, width, height) then
+		if not self.activeControl then
+			if self.mouseLeft == KEY_PRESSED then
+				self.activeControl = id
+				color = self.theme.btn_down
+			else
+				color = self.theme.btn_hover
+			end
+		elseif self.activeControl == id then
+			color = self.theme.btn_down
+			if self.mouseLeft == KEY_RELEASED then
+				clicked = true	
+			end
+		end
+	end
+	
+	--now we can create the button rect
+	local bg = self:_mkRect(id, x + pad, y + pad, width, height, color)
 
 	self:_addRect(bg)
 	self:_addText(txt)
 
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+
+	return clicked
 end
 
 function mimic:rect(str, x, y, w, h)
