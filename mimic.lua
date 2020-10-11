@@ -225,6 +225,8 @@ function mimic:draw()
 	
 	for n = 1, #self.windowStack do
 		local window = self.windowStack[n]
+		love.graphics.push()
+		love.graphics.translate(window.x, window.y)
 		gfx.setShader(RECTSHADER)
 		RECTSHADER:send("windowpos", WINDOWPOS)
 		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
@@ -233,7 +235,8 @@ function mimic:draw()
 		gfx.drawInstanced(RECT_MESH, window.instMax)
 		gfx.setShader()
 
-		gfx.draw(window.text, window.x, window.y)
+		gfx.draw(window.text)
+		love.graphics.pop()
 		-- love.graphics.setLineWidth(0.5)
 		-- gfx.setColor(self.theme.win_titleColor)
 		-- gfx.rectangle("line", window.x+0.5, window.y+0.5, window.w-1, window.h-1)
@@ -261,8 +264,6 @@ function mimic:mousemoved(x, y, dx, dy, istouch)
 		local window = self.dragWindow
 		window.x = x - self.dragx
 		window.y = y - self.dragy
-		window.instDirty = true
-		window.textDirty = true
 	end
 end
 
@@ -307,8 +308,8 @@ end
 --
 function mimic:_mkRect(id, x, y, w, h, color, border)
 	border = border and 1 or 0
-	x = x + self.liveWindow.x
-	y = y + self.liveWindow.y
+	-- x = x + self.liveWindow.x
+	-- y = y + self.liveWindow.y
 
 	color = color or self.theme.win_bg
 	--get/make the rect
