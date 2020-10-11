@@ -661,7 +661,12 @@ function mimic:text(str, ...)
 		str = str:format(...)
 	end
 
-	print(str)
+	local label, id = splitLabelId(str)
+	local pad = self.theme.padding
+
+	local txt = self:_mkText(str, id, self.liveWindow.nextx + pad + 2, self.liveWindow.nexty + pad)
+	self:_addText(txt)
+	self.liveWindow.nexty = self.liveWindow.nexty + self.fontHeight + pad
 end
 
 function mimic:button(str)
