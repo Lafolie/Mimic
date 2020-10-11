@@ -54,8 +54,8 @@ local RECT_VERTS =
 
 local RECT_MESH = gfx.newMesh(RECT_VERTS) --mesh to be instanced
 
-local ATTRIBUTE_TABLE = {{"instanceBody", "float", 4}, {"instanceColor", "float", 4}}
-local ATTRIBUTE_ZERO = {0, 0, 0, 0,    0, 0, 0, 0}
+local ATTRIBUTE_TABLE = {{"instanceBody", "float", 4}, {"instanceColor", "float", 4}, {"instanceBorder", "float", 1}}
+local ATTRIBUTE_ZERO = {0, 0, 0, 0,    0, 0, 0, 0,    0}
 local BUFFER_INIT_SIZE = 64
 local BUFFER_INIT_LIST = {}
 --fill init tbl with zeros, to be used by new instance meshs
@@ -66,6 +66,7 @@ end
 local GLSL_FRAG = [[
 	uniform vec4 bordercolor;
 	varying vec4 passcolor;
+	varying float passborder;
 
 	vec4 effect( vec4 color, Image tex, vec2 texture_coords, vec2 screen_coords )
 	{
@@ -75,11 +76,11 @@ local GLSL_FRAG = [[
 		// thanks to a13X_B for the help with this
 		float du = dFdx(texture_coords.x);
 		bool is_in_border = texture_coords.x > du && texture_coords.x < (1. - du);
-		texcolor = mix(texcolor, bordercolor, 1. -float(is_in_border));
+		texcolor = mix(texcolor, bordercolor, passborder * (1. -float(is_in_border)));
 
 		float dv = dFdy(-texture_coords.y);
 		is_in_border = texture_coords.y > dv && texture_coords.y < (1. - dv);
-		texcolor = mix(texcolor, bordercolor, 1. -float(is_in_border));
+		texcolor = mix(texcolor, bordercolor, passborder * (1. -float(is_in_border)));
 
 		return texcolor;
 	}
@@ -88,21 +89,26 @@ local GLSL_FRAG = [[
 local GLSL_VERT = [[
 	attribute vec4 instanceBody;
 	attribute vec4 instanceColor;
+	attribute float instanceBorder;
+	uniform vec2 windowpos;
 	varying vec4 passcolor;
+	varying float passborder;
 
 	vec4 position(mat4 transform_projection, vec4 vertex_position)
 	{
 		vertex_position.x *= instanceBody.z;
-		vertex_position.x += instanceBody.x;
+		vertex_position.x += instanceBody.x + windowpos.x;
 		vertex_position.y *= instanceBody.w;
-		vertex_position.y += instanceBody.y;
+		vertex_position.y += instanceBody.y + windowpos.y;
 
 		passcolor = instanceColor;
+		passborder = instanceBorder;
 
 		return transform_projection * vertex_position;
 	}
 ]]
 
+local WINDOWPOS = {0, 0}
 local RECTSHADER = gfx.newShader(GLSL_FRAG, GLSL_VERT)
 
 local CHECK_VERTS = 
@@ -220,8 +226,10 @@ function mimic:draw()
 	for n = 1, #self.windowStack do
 		local window = self.windowStack[n]
 		gfx.setShader(RECTSHADER)
+		RECTSHADER:send("windowpos", WINDOWPOS)
 		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
 		RECT_MESH:attachAttribute("instanceColor", window.instMesh, "perinstance")
+		RECT_MESH:attachAttribute("instanceBorder", window.instMesh, "perinstance")
 		gfx.drawInstanced(RECT_MESH, window.instMax)
 		gfx.setShader()
 
@@ -297,7 +305,8 @@ end
 --
 --! X/Y RELVATIVE TO WINDOW !
 --
-function mimic:_mkRect(id, x, y, w, h, color)
+function mimic:_mkRect(id, x, y, w, h, color, border)
+	border = border and 1 or 0
 	x = x + self.liveWindow.x
 	y = y + self.liveWindow.y
 
@@ -305,7 +314,7 @@ function mimic:_mkRect(id, x, y, w, h, color)
 	--get/make the rect
 	local rect = self.cache[id]
 	if not rect then
-		rect = {x, y, w, h, color[1], color[2], color[3], color[4]}
+		rect = {x, y, w, h, color[1], color[2], color[3], color[4], border}
 		self.cache[id] = rect
 
 		--this is a new rect, so dirty and return
@@ -314,7 +323,9 @@ function mimic:_mkRect(id, x, y, w, h, color)
 	end
 
 	--check whether the dirty flag needs to be set
-	if rect[1] == x and rect[2] == y and rect[3] == w and rect[4] == h then
+	if rect[1] == x and rect[2] == y and rect[3] == w and rect[4] == h and
+	   rect[5] == color[1] and rect[6] == color[2] and rect[7] == color[3] and rect[8] == color[4] and
+	   rect[9] == border then
 		return rect
 	end
 
@@ -503,7 +514,7 @@ function mimic:windowBegin(str, initOptions)
 	-- end
 
 	--construct header and such
-	local bg = self:_mkRect(id, 0, 0, window.w, window.h)
+	local bg = self:_mkRect(id, 0, 0, window.w, window.h, nil, true)
 	self:_addRect(bg)
 
 	local pad = self.theme.padding
@@ -536,7 +547,7 @@ function mimic:windowEnd()
 		--send verts
 		window.instMesh:setVertices(window.instList)
 		window.instDirty = false
-		print "rebuilt mesh"
+		-- print "rebuilt mesh"
 	end
 
 	--zero out unused text instances
