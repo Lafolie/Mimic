@@ -157,17 +157,29 @@ end
 -- Theming
 -------------------------------------------------------------------------------
 
+--API functions set pending theme, as it can't be changed mid-frame
+--e.g. from a mimic:button() callback
 function mimic:setTheme(theme)
+	--we check against nil, so or false is required here
+	self.pendingTheme = theme or false
+end
+
+function mimic:setFont(path, size)
+	self.pendingFontPath = path or false
+	self.pendingFontSize = size
+end
+
+function mimic:_setTheme(theme)
 	theme = theme or DEFAULT_THEME
 	self.theme = theme
-	self:setFont(theme.font, theme.fontSize)
+	self:_setFont(theme.font, theme.fontSize)
 	RECTSHADER:send("bordercolor", theme.borderColor)
 
 	self.titleHeight = self.fontHeight + theme.padding * 2
 	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
 end
 
-function mimic:setFont(path, size)
+function mimic:_setFont(path, size)
 	self.font = path and gfx.newFont(path, size) or gfx.getFont()
 
 	--regenerate text batches
@@ -175,7 +187,7 @@ function mimic:setFont(path, size)
 		window.text:release()
 		window.text = gfx.newText(self.font)
 		window.textDirty = true
-		
+
 		--in some cases we also need to update the string widths
 		for k, txt in ipairs(window.textList) do
 			txt[4] = self.font:getWidth(txt[1][2])
@@ -214,10 +226,22 @@ function mimic:init(theme)
 	self.dragx = 0
 	self.dragy = 0
 
-	self:setTheme(theme or DEFAULT_THEME)
+	self:_setTheme(theme or DEFAULT_THEME)
 end
 
 function mimic:update()
+	--false is a valid arg, so check explicitly for nil
+	if self.pendingTheme ~= nil then
+		self:_setTheme(self.pendingTheme)
+		self.pendingTheme = nil
+	end
+
+	if self.pendingFontPath ~= nil then
+		self:_setFont(self.pendingFontPath, self.pendingFontSize)
+		self.pendingFontPath = nil
+		self.pendingFontSize = nil
+	end
+
 	if self.oldMouseLeft % 2 == 0 then
 		self.mouseLeft = self.mouseLeft - 1
 	end
