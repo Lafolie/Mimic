@@ -654,9 +654,7 @@ function mimic:_mkQuad(id, spr, x, y, color)
 end
 
 function mimic:_addQuad(quad)
-	do
-		return
-	end
+	-- do return end
 	local window = self.liveWindow
 	local i = window.quadIndex
 	local list = window.quadList
