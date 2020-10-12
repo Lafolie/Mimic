@@ -191,7 +191,7 @@ function mimic:_setTheme(theme)
 	self.titleHeight = self.fontHeight + theme.padding * 2
 	self:_buildAtlas()
 	self:_regenSpriteBatches()
-	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
+	self.cache = setmetatable({}, {__mode = "v"}) --purge the cache, everything needs to be rebuilt anyway
 end
 
 function mimic:_setFont(path, size)
@@ -533,6 +533,7 @@ end
 
 --add a rect instance to the live window, and return it
 function mimic:_addRect(rect)
+	-- do return end
 	local window = self.liveWindow
 	local i = window.instIndex
 	local list = window.instList
@@ -594,7 +595,8 @@ function mimic:_mkText(id, str, x, y, color)
 		return txt
 	end
 
-	txt[1] = str
+	txt[1][1] = color
+	txt[1][2] = str
 	txt[2] = x
 	txt[3] = y
 	txt[4] = self.font:getWidth(str)
@@ -605,6 +607,7 @@ end
 
 --add text to the live window text object, and return it
 function mimic:_addText(txt)
+	-- do return end
 	local window = self.liveWindow
 	local i = window.textIndex
 	local list = window.textList
@@ -651,6 +654,9 @@ function mimic:_mkQuad(id, spr, x, y, color)
 end
 
 function mimic:_addQuad(quad)
+	do
+		return
+	end
 	local window = self.liveWindow
 	local i = window.quadIndex
 	local list = window.quadList
@@ -880,7 +886,7 @@ function mimic:_isActive(id, x, y, w, h)
 				state = BTN_HOVER
 			end
 		elseif self.activeControl == id then
-			color = self.theme.btn_down
+			-- color = self.theme.btn_down
 			state = BTN_DOWN
 			if self.mouseLeft == KEY_RELEASED then
 				state = BTN_CLICK
@@ -895,11 +901,11 @@ function mimic:text(str, ...)
 	if (...) then
 		str = str:format(...)
 	end
-
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
+	-- print(label, id)
 
-	local txt = self:_mkText(str, id, self.liveWindow.nextx + pad + 2, self.liveWindow.nexty + pad)
+	local txt = self:_mkText(id, label, self.liveWindow.nextx + pad + 2, self.liveWindow.nexty + pad)
 	self:_addText(txt)
 	self.liveWindow.nexty = self.liveWindow.nexty + self.fontHeight + pad
 end
@@ -1002,6 +1008,30 @@ function mimic:rect(str, x, y, w, h)
 	local label, id = splitLabelId(str)
 	local rect = self:_mkRect(id, x, y, w, h)
 	self:_addRect(rect)
+end
+
+function mimic:cacheBrowser()
+	self:windowBegin("Cache Browser##__cache_browser__", {x=32, y=32})
+		-- self.liveWindow.cacheCopy = self.liveWindow.cacheCopy or {}
+
+		-- if self:button("Refresh##__cache_browser_btn__>browse") then
+			local copy = {}
+			for k, v in pairs(self.cache) do
+				if not k:match(".+>browse$") then
+					insert(copy, tostring(k))
+				end
+				-- assert()
+			end
+			table.sort(copy)
+			-- self.liveWindow.cacheCopy = copy
+		-- end
+
+		self:text("Cache size: %d##__cache_sizetxt__>browse", #copy)
+		for k, v in ipairs(copy) do
+			self:text(v .. "##>browse")
+		end
+	self:windowEnd()
+	-- collectgarbage "collect"
 end
 
 return function(id)
