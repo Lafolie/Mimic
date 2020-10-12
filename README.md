@@ -1,3 +1,5 @@
+[[/wiki/banner.png]]
+
 # Mimic
 
 A single-require, pure Lua, Immediate-Mode GUI library for Löve projects.
