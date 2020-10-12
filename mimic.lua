@@ -134,6 +134,9 @@ local KEY_RELEASED = 2
 local KEY_DOWN = 3
 local KEY_PRESSED = 4
 
+local COLOR_WHITE = {1, 1, 1, 1}
+local COLOR_BLACK = {0, 0, 0, 1}
+
 local function splitLabelId(str)
 	local lbl = str:match("^(.+)##.*") or str
 	return lbl, str
@@ -181,6 +184,7 @@ function mimic:_setTheme(theme)
 
 	self.titleHeight = self.fontHeight + theme.padding * 2
 	self:_buildAtlas()
+	self:_regenSpriteBatches()
 	self.cache = {} --purge the cache, everything needs to be rebuilt anyway
 end
 
@@ -220,7 +224,7 @@ function mimic:_buildAtlas()
 	-- local size = (self.theme.fontSize) * 1
 
 	gfx.setCanvas(canvas)
-		gfx.clear(0.1, 0.1, 0.1, 1)
+		-- gfx.clear(0.1, 0.1, 0.1, 1)
 	push()
 
 	--begin checkbox
@@ -315,7 +319,9 @@ end
 
 function mimic:_regenSpriteBatches()
 	for _, window in ipairs(self.windows) do
-		-- window.
+		window.spriteBatch:release()
+		window.spriteBatch = gfx.newSpriteBatch(self.atlas)
+		window.quadDirty = true
 	end
 end
 
@@ -414,26 +420,16 @@ function mimic:draw()
 		gfx.setShader()
 
 		gfx.draw(window.text)
+		gfx.setBlendMode("alpha", "premultiplied")
+		gfx.draw(window.spriteBatch)
+		gfx.setBlendMode("alpha", "alphamultiply")
+
 		love.graphics.pop()
 
-		gfx.draw(self.atlas, 0, 100)
-		-- love.graphics.setLineWidth(0.5)
-		-- gfx.setColor(self.theme.win_titleColor)
-		-- gfx.rectangle("line", window.x+0.5, window.y+0.5, window.w-1, window.h-1)
-		-- gfx.print(window.z, window.x, window.y-20)
 		-- gfx.print(window.sortingCoef, window.x, window.y-40)
-
-		-- self.windowStack[n] = nil
-		-- love.graphics.print(self.mouseLeft, 1, 300)
 	end
-	-- gfx.push()
-	-- love.graphics.clear()
-	-- gfx.rotate(0.7853981634)
-	-- gfx.rectangle("fill", 100, 0, 80, 40)
-	-- gfx.rotate(-0.7853981634 * 2)
-	-- gfx.rectangle("fill", 0, 140, 160, 40)
-	-- -- gfx.draw(check, 1, 1)
-	-- gfx.pop()
+
+	gfx.draw(self.atlas, 0, 100)
 end
 
 function mimic:mousemoved(x, y, dx, dy, istouch)
@@ -617,18 +613,46 @@ end
 -- Quad Helpers
 -------------------------------------------------------------------------------
 
-function mimic:_mkQuad(id, spr, x, y)
+function mimic:_mkQuad(id, spr, x, y, color)
+	color = color or COLOR_WHITE
 	local quad = self.cache[id]
 	if not quad then
-		quad = {bleh, x, y}
+		quad = {self.atlasQuads[spr], x, y, color}
+		self.cache[id] = quad
+		self.liveWindow.quadDirty = true
+		return quad
 	end
+
+	--check to see whether we need to set the dirty flag
+	if quad[1] == self.atlasQuads[spr] and quad[2] == x and quad[3] == y and quad[4] == color then
+		return quad
+	end
+
+	quad[1] = self.atlasQuads[spr]
+	quad[2] = x
+	quad[3] = y
+	quad[4] = color
+
+	self.liveWindow.quadDirty = true
 
 	return quad
 end
 
-function mimic:_addQuad()
+function mimic:_addQuad(quad)
 	local window = self.liveWindow
+	local i = window.quadIndex
+	local list = window.quadList
 
+	--check to see if we need to set the dirty flag
+	--(whether the draw list differs from last frame)
+	if (not window.quadDirty) and list[i] ~= quad then
+		window.quadDirty = true
+	end
+
+	list[i] = quad
+	window.quadIndex = i + 1
+
+	return quad
 end
 
 -------------------------------------------------------------------------------
@@ -653,11 +677,11 @@ function mimic:_mkWindow(id, x, y, w)
 
 		--geometry
 		instMesh = gfx.newMesh(ATTRIBUTE_TABLE, BUFFER_INIT_LIST, nil, "dynamic"),
+		instDirty = true,
 		instList = clone(BUFFER_INIT_LIST),
 		instMax = BUFFER_INIT_SIZE,
 		instIndex = 1,
 		instCount = 0,
-		instDirty = true,
 
 		--text
 		text = gfx.newText(self.font),
@@ -668,8 +692,8 @@ function mimic:_mkWindow(id, x, y, w)
 
 		--quads
 		spriteBatch = gfx.newSpriteBatch(self.atlas, 99),
-		quadList = {},
 		quadDirty = false,
+		quadList = {},
 		quadIndex = 1,
 		quadCount = 0
 	}
@@ -717,13 +741,15 @@ function mimic:windowBegin(str, initOptions)
 	local txt = self:_mkText(id .. ">headtxt", label, pad, pad)
 	local header = self:_mkRect(id .. ">head", 0, 0, window.w, self.fontHeight + pad * 2, self.theme.win_titleColor)
 
-	local closebg = self:_mkRect(id ..">close", window.w-32 - pad, 0, 33, self.fontHeight + pad, self.theme.win_close)
-	local closetxt = self:_mkText(id .. ">closttxt", "X", window.w-26, pad * 0.5)
+	local closew = self.fontHeight * 2
+	local closebg = self:_mkRect(id ..">close", window.w-closew - 1, 0, closew, self.fontHeight + pad, self.theme.win_close)
+	-- local closetxt = self:_mkText(id .. ">closttxt", "X", window.w-26, pad * 0.5)
+	local xquad = self:_mkQuad(id .. ">closex", 7, window.w-closew + self.fontHeight * 0.5 -1, pad * 0.5)
 
 	self:_addRect(header)
 	self:_addText(txt)
 	self:_addRect(closebg)
-	self:_addText(closetxt)
+	self:_addQuad(xquad)
 
 
 	window.nexty = self.fontHeight + pad * 2
@@ -772,11 +798,36 @@ function mimic:windowEnd()
 		print "rebuilt text"
 	end
 
+	--zero out unused quads
+	if window.quadIndex - 1 ~= window.quadCount then
+		for n = window.quadIndex, window.quadCount do
+			window.quadList[n] = nil
+		end
+		window.quadDirty = true
+	end
+
+	--refresh quads if needed
+	if window.quadDirty then
+		local batch = window.spriteBatch
+		local list = window.quadList
+		batch:clear()
+		for n = 1, #list do
+			local quad = list[n]
+			batch:setColor(quad[4])
+			batch:add(quad[1], quad[2], quad[3])
+
+		end
+		window.quadDirty = false
+		print "rebuilt batch"
+	end
+
 	--cleanup
 	window.instCount = window.instIndex - 1
 	window.instIndex = 1
 	window.textCount = window.textIndex - 1
 	window.textIndex = 1
+	window.quadCount = window.quadIndex - 1
+	window.quadIndex = 1
 	window.nextx = 0
 	window.nexty = 0
 	self.liveWindow = false
