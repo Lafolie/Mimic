@@ -134,6 +134,11 @@ local KEY_RELEASED = 2
 local KEY_DOWN = 3
 local KEY_PRESSED = 4
 
+local BTN_UP = 1
+local BTN_HOVER = 2
+local BTN_DOWN = 3
+local BTN_CLICK = 4
+
 local COLOR_WHITE = {1, 1, 1, 1}
 local COLOR_WHITE_HALF = {1, 1, 1, 0.5}
 local COLOR_BLACK = {0, 0, 0, 1}
@@ -458,8 +463,12 @@ function mimic:mousepressed(x, y, btn, istouch, presses)
 		end
 	end
 
+	goto skipsort
+
 	::done::
 	self:_sortWindowStack()
+
+	::skipsort::
 
 	if btn == 1 then
 		self.mouseLeft = KEY_PRESSED
@@ -860,6 +869,28 @@ end
 -- Controls
 -------------------------------------------------------------------------------
 
+function mimic:_isActive(id, x, y, w, h)
+	local state = BTN_UP
+	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, w, h) then
+		if not self.activeControl then
+			if self.mouseLeft == KEY_PRESSED then
+				self.activeControl = id
+				state = BTN_DOWN
+			else
+				state = BTN_HOVER
+			end
+		elseif self.activeControl == id then
+			color = self.theme.btn_down
+			state = BTN_DOWN
+			if self.mouseLeft == KEY_RELEASED then
+				state = BTN_CLICK
+			end
+		end
+	end
+
+	return state
+end
+
 function mimic:text(str, ...)
 	if (...) then
 		str = str:format(...)
@@ -874,7 +905,6 @@ function mimic:text(str, ...)
 end
 
 function mimic:button(str)
-	local clicked
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
 	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
@@ -885,21 +915,14 @@ function mimic:button(str)
 	local width = txt[4] + pad * 2
 	
 	--mouse interactions
-	local color = self.theme.btn_color
-	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, width, height) then
-		if not self.activeControl then
-			if self.mouseLeft == KEY_PRESSED then
-				self.activeControl = id
-				color = self.theme.btn_down
-			else
-				color = self.theme.btn_hover
-			end
-		elseif self.activeControl == id then
-			color = self.theme.btn_down
-			if self.mouseLeft == KEY_RELEASED then
-				clicked = true	
-			end
-		end
+	local color
+	local state = self:_isActive(id, x, y, width, height)
+	if state == BTN_HOVER then
+		color = self.theme.btn_hover
+	elseif state == BTN_DOWN then
+		color = self.theme.btn_down
+	else
+		color =  self.theme.btn_color
 	end
 	
 	--now we can create the button rect
@@ -910,7 +933,7 @@ function mimic:button(str)
 
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
 
-	return clicked
+	return state == BTN_CLICK
 end
 
 function mimic:checkBox(str, isChecked)
@@ -919,39 +942,32 @@ function mimic:checkBox(str, isChecked)
 	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
 	local height = self.fontHeight
 	local clicked
-	
+
 	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
+
 	--mouse interactions
 	local color
-	-- local color = self.theme.btn_color
-	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height + pad + txt[4], height) then
-		if not self.activeControl then
-			if self.mouseLeft == KEY_PRESSED then
-				self.activeControl = id
-				color = self.theme.btn_down
-			else
-				color = self.theme.btn_hover
-			end
-		elseif self.activeControl == id then
-			color = self.theme.btn_down
-			if self.mouseLeft == KEY_RELEASED then
-				isChecked = not isChecked
-				clicked = true
-			end
-		end
+	local state = self:_isActive(id, x, y, height + pad + txt[4], height)
+	if state == BTN_HOVER then
+		color = self.theme.btn_hover
+	elseif state == BTN_DOWN then
+		color = self.theme.btn_down
+	else
+		color =  self.theme.btn_color
 	end
 
 	local box = self:_mkRect(id, x, y, height, height, color, true)
+	local check = self:_mkQuad(id .. ">quad", isChecked and 2 or 1, x, y, self.theme.textColor)
+
 	self:_addRect(box)
 	self:_addText(txt)
+	self:_addQuad(check)
 
-	if isChecked then
-		local check = self:_mkQuad(id .. ">quad", 2, x, y, self.theme.textColor)
-		self:_addQuad(check)
-	end
+	-- if isChecked then
+	-- end
 
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
-	return isChecked, clicked
+	return state == BTN_CLICK
 end
 
 function mimic:radioButton(str, selected)
@@ -959,28 +975,18 @@ function mimic:radioButton(str, selected)
 	local pad = self.theme.padding
 	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
 	local height = self.fontHeight
-	local clicked
 	
 	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
 
 	--mouse interactions
 	local color
-	-- local color = self.theme.btn_color
-	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height + pad + txt[4], height) then
-		if not self.activeControl then
-			if self.mouseLeft == KEY_PRESSED then
-				self.activeControl = id
-				color = self.theme.btn_down
-			else
-				color = self.theme.btn_hover
-			end
-		elseif self.activeControl == id then
-			color = self.theme.btn_down
-			if self.mouseLeft == KEY_RELEASED then
-				selected = not selected
-				clicked = true
-			end
-		end
+	local state = self:_isActive(id, x, y, height + pad + txt[4], height)
+	if state == BTN_HOVER then
+		color = self.theme.btn_hover
+	elseif state == BTN_DOWN then
+		color = self.theme.btn_down
+	else
+		color =  self.theme.btn_color
 	end
 
 	local radio = self:_mkQuad(id, selected and 4 or 3 , x, y, self.theme.textColor)
@@ -988,13 +994,8 @@ function mimic:radioButton(str, selected)
 	self:_addQuad(radio)
 	self:_addText(txt)
 
-	-- if selected then
-	-- 	local quad = self:_mkQuad(id .. ">radio", 4, x, y)
-	-- 	self:_addQuad(quad)
-	-- end
-
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
-	return clicked
+	return state == BTN_CLICK
 end
 
 function mimic:rect(str, x, y, w, h)
