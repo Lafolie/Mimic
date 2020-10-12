@@ -135,6 +135,7 @@ local KEY_DOWN = 3
 local KEY_PRESSED = 4
 
 local COLOR_WHITE = {1, 1, 1, 1}
+local COLOR_WHITE_HALF = {1, 1, 1, 0.5}
 local COLOR_BLACK = {0, 0, 0, 1}
 
 local function splitLabelId(str)
@@ -427,9 +428,11 @@ function mimic:draw()
 		love.graphics.pop()
 
 		-- gfx.print(window.sortingCoef, window.x, window.y-40)
+		-- gfx.print(window.quadCount, window.x, window.y-40)
+
 	end
 
-	gfx.draw(self.atlas, 0, 100)
+	-- gfx.draw(self.atlas, 0, 100)
 end
 
 function mimic:mousemoved(x, y, dx, dy, istouch)
@@ -744,7 +747,7 @@ function mimic:windowBegin(str, initOptions)
 	local closew = self.fontHeight * 2
 	local closebg = self:_mkRect(id ..">close", window.w-closew - 1, 0, closew, self.fontHeight + pad, self.theme.win_close)
 	-- local closetxt = self:_mkText(id .. ">closttxt", "X", window.w-26, pad * 0.5)
-	local xquad = self:_mkQuad(id .. ">closex", 7, window.w-closew + self.fontHeight * 0.5 -1, pad * 0.5)
+	local xquad = self:_mkQuad(id .. ">closex", 7, window.w-closew + self.fontHeight * 0.5 -1, pad * 0.5, COLOR_WHITE_HALF)
 
 	self:_addRect(header)
 	self:_addText(txt)
@@ -908,6 +911,45 @@ function mimic:button(str)
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
 
 	return clicked
+end
+
+function mimic:checkBox(str, isChecked)
+	local label, id = splitLabelId(str)
+	local pad = self.theme.padding
+	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local height = self.fontHeight
+
+	--mouse interactions
+	local color
+	-- local color = self.theme.btn_color
+	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height, height) then
+		if not self.activeControl then
+			if self.mouseLeft == KEY_PRESSED then
+				self.activeControl = id
+				color = self.theme.btn_down
+			else
+				color = self.theme.btn_hover
+			end
+		elseif self.activeControl == id then
+			color = self.theme.btn_down
+			if self.mouseLeft == KEY_RELEASED then
+				isChecked = not isChecked
+			end
+		end
+	end
+
+	local box = self:_mkRect(id, x, y, height, height, color, true)
+	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
+	self:_addRect(box)
+	self:_addText(txt)
+
+	if isChecked then
+		local check = self:_mkQuad(id .. ">quad", 2, x, y)
+		self:_addQuad(check)
+	end
+
+	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+	return isChecked
 end
 
 function mimic:rect(str, x, y, w, h)
