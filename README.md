@@ -119,3 +119,5 @@ Next, labels/buttons?
  * [@DaleJ_Dev](https://twitter.com/DaleJ_Dev) - core development
  * TunaNoot - Mimic creature logo
  * [Löve Community](https://love2d.org/) - For their awesome support in developing this project
+
+ ![logo](/wiki/mimicLogo.png)
