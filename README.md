@@ -1,4 +1,4 @@
-[[/wiki/banner.png]]
+![mimiBanner](/wiki/banner.png)
 
 # Mimic
 
