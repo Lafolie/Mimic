@@ -4,7 +4,7 @@
 
 A single-require, pure Lua, Immediate-Mode GUI library for Löve projects.
 
-The API design is inspired by [Dear IMGUI](), adapted for Lua.
+The API design is inspired by [Dear IMGUI](https://github.com/ocornut/imgui), adapted for Lua.
 
 ## Features
 
