@@ -233,6 +233,12 @@ function mimic:_buildAtlas()
 		-- gfx.clear(0.1, 0.1, 0.1, 1)
 	push()
 
+	--[[
+		THIS NEEDS TO BE REDONE WITHOUT GFX.SCALE:
+		PRODUCES UGLY RESULTS
+		SCALE PARAMETERS INSTEAD
+	]]
+
 	--begin checkbox
 	gfx.setColor(0.05, 0.05, 0.05)
 	gfx.scale(size)
@@ -690,6 +696,7 @@ function mimic:_mkWindow(id, x, y, w)
 		--layout control
 		nextx = 0,
 		nexty = 0,
+		treeStates = {}, --transient, will reset when app closes
 
 		--geometry
 		instMesh = gfx.newMesh(ATTRIBUTE_TABLE, BUFFER_INIT_LIST, nil, "dynamic"),
@@ -725,6 +732,7 @@ function mimic:windowBegin(str, initOptions)
 	local window = self.windows[id]
 	if not window then
 		window = self:_mkWindow(id, initOptions.x, initOptions.y, initOptions.w or 256)
+		window.isTransient = initOptions.isTransient
 	end
 
 	window.sortingCoef = initOptions.alwaysOnTop and 1 or 0
@@ -773,26 +781,7 @@ end
 
 function mimic:windowEnd()
 	local window = self.liveWindow
-	--zero out unused mesh instances
-	if window.instIndex - 1 ~= window.instCount then
-		for n = window.instIndex , window.instCount do
-			window.instList[n] = ATTRIBUTE_ZERO
-		end
-		window.instDirty = true
-	end
-
-	--refresh mesh if needed
-	if window.instDirty then
-		--update the bg dimensions first
-		window.h = window.nexty + self.theme.padding
-		window.instList[1][4] = window.h
-
-		--send verts
-		window.instMesh:setVertices(window.instList)
-		window.instDirty = false
-		print "rebuilt mesh"
-	end
-
+	
 	--zero out unused text instances
 	if window.textIndex - 1 ~= window.textCount then
 		for n = window.textIndex, window.textCount do
@@ -800,7 +789,7 @@ function mimic:windowEnd()
 		end
 		window.textDirty = true
 	end
-
+	
 	--refresh text if needed
 	if window.textDirty then
 		local text = window.text
@@ -813,7 +802,7 @@ function mimic:windowEnd()
 		window.textDirty = false
 		print "rebuilt text"
 	end
-
+	
 	--zero out unused quads
 	if window.quadIndex - 1 ~= window.quadCount then
 		for n = window.quadIndex, window.quadCount do
@@ -821,7 +810,7 @@ function mimic:windowEnd()
 		end
 		window.quadDirty = true
 	end
-
+	
 	--refresh quads if needed
 	if window.quadDirty then
 		local batch = window.spriteBatch
@@ -835,6 +824,26 @@ function mimic:windowEnd()
 		end
 		window.quadDirty = false
 		print "rebuilt batch"
+	end
+	
+	--zero out unused mesh instances
+	if window.instIndex - 1 ~= window.instCount then
+		for n = window.instIndex , window.instCount do
+			window.instList[n] = ATTRIBUTE_ZERO
+		end
+		window.instDirty = true
+	end
+
+	--refresh mesh if needed
+	if window.instDirty or window.nexty + self.theme.padding ~= window.h then
+		--update the bg dimensions first
+		window.h = window.nexty + self.theme.padding
+		window.instList[1][4] = window.h
+
+		--send verts
+		window.instMesh:setVertices(window.instList)
+		window.instDirty = false
+		print "rebuilt mesh"
 	end
 
 	--cleanup
@@ -1009,7 +1018,7 @@ function mimic:rect(str, x, y, w, h)
 end
 
 function mimic:cacheBrowser()
-	self:windowBegin("Cache Browser##__cache_browser__", {x=32, y=32})
+	self:windowBegin("Cache Browser##__cache_browser__", {x=love.graphics.getWidth()-256, y=0})
 		-- self.liveWindow.cacheCopy = self.liveWindow.cacheCopy or {}
 
 		-- if self:button("Refresh##__cache_browser_btn__>browse") then
@@ -1030,6 +1039,43 @@ function mimic:cacheBrowser()
 		end
 	self:windowEnd()
 	-- collectgarbage "collect"
+end
+
+function mimic:header(str)
+	local label, id = splitLabelId(str)
+	local pad = self.theme.padding
+	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local height = self.fontHeight
+	local width = self.liveWindow.w
+
+	local expand = self.liveWindow.treeStates[id]
+	if expand == nil then
+		expand = false
+	end
+	
+	if self:_isActive(id, x, y, width, height) == BTN_CLICK then
+		expand = not expand
+	end
+
+	self.liveWindow.treeStates[id] = expand
+
+	local rect = self:_mkRect(id, x - pad, y, width, height + pad * 2, self.theme.win_titleColor)
+	local quad = self:_mkQuad(id .. ">tri", expand and 6 or 5, x + pad, y + pad + math.floor(height /10))
+	local txt = self:_mkText(id .. ">txt", label, x + height + pad * 2, y + pad)
+	self:_addRect(rect)
+	self:_addQuad(quad)
+	self:_addText(txt)
+
+	self.liveWindow.nexty = y + height + pad * 2
+	return expand
+end
+
+function mimic:tree(str)
+
+end
+
+function mimic:pairs(str, tbl)
+
 end
 
 return function(id)
