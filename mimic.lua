@@ -252,20 +252,20 @@ function mimic:_buildAtlas()
 	gfx.setColor(0.05, 0.05, 0.05)
 	-- gfx.rectangle("fill", 0, 0, 1, 1)
 
-	gfx.setColor(0, 0, 0, 1)
-	gfx.circle("fill", 0.5, 0.5, 0.45)
+	gfx.setColor(0, 0, 0, 0.5)
+	-- gfx.circle("fill", 0.5, 0.5, 0.45)
 	gfx.setColor(1, 1, 1, 1)
-	gfx.setLineWidth(0.5/size)
+	gfx.setLineWidth(0.75/size)
 	gfx.circle("line", 0.5, 0.5, 0.45)
 	gfx.setLineWidth(1)
 
 	--draw the radio full
-	gfx.translate(-3, 1)
+	gfx.translate(-2, 1)
 	gfx.setColor(0.05, 0.05, 0.05)
 	-- gfx.rectangle("fill", 0, 0, 1, 1)
 	
-	gfx.setColor(0, 0, 0, 1)
-	gfx.circle("fill", 0.5, 0.5, 0.45)
+	gfx.setColor(0, 0, 0, 0.5)
+	-- gfx.circle("fill", 0.5, 0.5, 0.45)
 	gfx.setColor(1, 1, 1, 1)
 	gfx.setLineWidth(0.5/size)
 	gfx.circle("line", 0.5, 0.5, 0.45)
@@ -291,7 +291,7 @@ function mimic:_buildAtlas()
 	gfx.polygon("fill", 0.1, 0.1, 0.9, 0.1, 0.5, 0.9)
 
 	--draw the x
-	gfx.translate(1, 0)
+	gfx.translate(-2, 1)
 	gfx.setColor(0.05, 0.05, 0.05)
 	-- gfx.rectangle("fill", 0, 0, 1, 1)
 
@@ -308,9 +308,9 @@ function mimic:_buildAtlas()
 
 	--generate quads
 	local quads = {}
-	for y = 0, 3 do
+	for y = 0, 2 do
 		local yy = y * size
-		for x = 0, 3 do
+		for x = 0, 2 do
 			local quad = gfx.newQuad(x * size, yy, size, size, dimensions, dimensions)
 			insert(quads, quad)
 		end
@@ -432,7 +432,7 @@ function mimic:draw()
 
 	end
 
-	-- gfx.draw(self.atlas, 0, 100)
+	gfx.draw(self.atlas, 0, 100)
 end
 
 function mimic:mousemoved(x, y, dx, dy, istouch)
@@ -747,7 +747,7 @@ function mimic:windowBegin(str, initOptions)
 	local closew = self.fontHeight * 2
 	local closebg = self:_mkRect(id ..">close", window.w-closew - 1, 0, closew, self.fontHeight + pad, self.theme.win_close)
 	-- local closetxt = self:_mkText(id .. ">closttxt", "X", window.w-26, pad * 0.5)
-	local xquad = self:_mkQuad(id .. ">closex", 7, window.w-closew + self.fontHeight * 0.5 -1, pad * 0.5, COLOR_WHITE_HALF)
+	local xquad = self:_mkQuad(id .. ">closex", 7, window.w-closew + self.fontHeight * 0.5 -1, pad * 0.5, COLOR_WHITE)
 
 	self:_addRect(header)
 	self:_addText(txt)
@@ -918,11 +918,13 @@ function mimic:checkBox(str, isChecked)
 	local pad = self.theme.padding
 	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
 	local height = self.fontHeight
-
+	local clicked
+	
+	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
 	--mouse interactions
 	local color
 	-- local color = self.theme.btn_color
-	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height, height) then
+	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height + pad + txt[4], height) then
 		if not self.activeControl then
 			if self.mouseLeft == KEY_PRESSED then
 				self.activeControl = id
@@ -934,22 +936,65 @@ function mimic:checkBox(str, isChecked)
 			color = self.theme.btn_down
 			if self.mouseLeft == KEY_RELEASED then
 				isChecked = not isChecked
+				clicked = true
 			end
 		end
 	end
 
 	local box = self:_mkRect(id, x, y, height, height, color, true)
-	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
 	self:_addRect(box)
 	self:_addText(txt)
 
 	if isChecked then
-		local check = self:_mkQuad(id .. ">quad", 2, x, y)
+		local check = self:_mkQuad(id .. ">quad", 2, x, y, self.theme.textColor)
 		self:_addQuad(check)
 	end
 
 	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
-	return isChecked
+	return isChecked, clicked
+end
+
+function mimic:radioButton(str, selected)
+	local label, id = splitLabelId(str)
+	local pad = self.theme.padding
+	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local height = self.fontHeight
+	local clicked
+	
+	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
+
+	--mouse interactions
+	local color
+	-- local color = self.theme.btn_color
+	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, height + pad + txt[4], height) then
+		if not self.activeControl then
+			if self.mouseLeft == KEY_PRESSED then
+				self.activeControl = id
+				color = self.theme.btn_down
+			else
+				color = self.theme.btn_hover
+			end
+		elseif self.activeControl == id then
+			color = self.theme.btn_down
+			if self.mouseLeft == KEY_RELEASED then
+				selected = not selected
+				clicked = true
+			end
+		end
+	end
+
+	local radio = self:_mkQuad(id, selected and 4 or 3 , x, y, self.theme.textColor)
+
+	self:_addQuad(radio)
+	self:_addText(txt)
+
+	-- if selected then
+	-- 	local quad = self:_mkQuad(id .. ">radio", 4, x, y)
+	-- 	self:_addQuad(quad)
+	-- end
+
+	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+	return clicked
 end
 
 function mimic:rect(str, x, y, w, h)
