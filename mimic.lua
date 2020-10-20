@@ -28,12 +28,13 @@ local mimic = {}
 -------------------------------------------------------------------------------
 -- Constants & private methods
 -------------------------------------------------------------------------------
-
+print(...)
 local DEFAULT_THEME = 
 {
 	font = nil,
 	fontSize = 12,
 	padding = 5,
+	scrollSize = 32,
 
 	bg = {0.05, 0.05, 0.1},
 	textColor = {1, 1, 1, 1},
@@ -42,12 +43,12 @@ local DEFAULT_THEME =
 	win_titleColor = {0.5, 0.5, 0.6, 1},
 	win_close = {0.9, 0.1, 0.4, 1},
 	btn_color = {0.15, 0.15, 0.2, 1},
-	btn_hover = {0.25, 0.25, 0.4, 1}
+	btn_hover = {0.25, 0.25, 0.4, 1},
 }
 
 local MIMIC_VERSION = "0.1"
 
-local insert, gfx = table.insert, love.graphics
+local insert, remove, concat, gfx = table.insert, table.remove, table.concat, love.graphics
 
 --unit rect
 local RECT_VERTS = 
@@ -62,11 +63,20 @@ local RECT_MESH = gfx.newMesh(RECT_VERTS) --mesh to be instanced
 
 local ATTRIBUTE_TABLE = {{"instanceBody", "float", 4}, {"instanceColor", "float", 4}, {"instanceBorder", "float", 1}}
 local ATTRIBUTE_ZERO = {0, 0, 0, 0,    0, 0, 0, 0,    0}
-local BUFFER_INIT_SIZE = 64
-local BUFFER_INIT_LIST = {}
---fill init tbl with zeros, to be used by new instance meshs
+
+local BUFFER_INIT_SIZE = 64 --control instance count
+local BUFFER_INIT_LIST = {} --control instance buffer (elements inside a window)
+
+local BUFFER_WINDOW_INIT_SIZE = 4 --main window count
+local BUFFER_WINDOW_INIT_LIST = {} --main window buffer (bg & head: non-scrolling)
+
+--fill init tbls with zeros, to be used by new instance meshs
 for n=1, BUFFER_INIT_SIZE do
 	BUFFER_INIT_LIST[n] = ATTRIBUTE_ZERO
+end
+
+for n=1, BUFFER_WINDOW_INIT_SIZE do
+	BUFFER_WINDOW_INIT_LIST[n] = ATTRIBUTE_ZERO
 end
 
 local GLSL_FRAG = [[
@@ -117,18 +127,6 @@ local GLSL_VERT = [[
 local WINDOWPOS = {0, 0}
 local RECTSHADER = gfx.newShader(GLSL_FRAG, GLSL_VERT)
 
-local CHECK_VERTS = 
-{
-	{0.125,0.6, 0,0.75, 1,1,1,1},
-	{0,0.75, 0,0.75, 1,1,1,1},
-	{0.25,0.75, 0,0.75, 1,1,1,1},
-	{0.25,1, 0,0.75, 1,1,1,1},
-	{1,0.25, 0,0.75, 1,1,1,1},
-	{0.9,0.1, 0,0.75, 1,1,1,1},
-	{0.25,0.75, 0,0.75, 1,1,1,1},
-
-}
-
 local KEY_UP = 1
 local KEY_RELEASED = 2
 local KEY_DOWN = 3
@@ -144,9 +142,20 @@ local COLOR_WHITE_HALF = {1, 1, 1, 0.5}
 local COLOR_BLACK = {0, 0, 0, 1}
 
 local function splitLabelId(str)
-	local lbl = str:match("^(.+)##.*") or str
+	local lbl, id = str:match("^(.*)(###.*)")
+	if id then
+		return lbl, id
+	end
+
+	lbl = str:match("^(.+)##.*") or str
 	return lbl, str
 end
+
+-- print(splitLabelId("No ID"))
+-- print(splitLabelId("Static ID##Hello"))
+-- print(splitLabelId("##Only Static"))
+-- print(splitLabelId("Dynamic ID###World"))
+-- print(splitLabelId("###Only Dynamic"))
 
 local function clone(tbl)
 	local t = {}
@@ -184,6 +193,9 @@ end
 
 function mimic:_setTheme(theme)
 	theme = theme or DEFAULT_THEME
+	if theme ~= DEFAULT_THEME then
+		theme = setmetatable(theme, {__index = DEFAULT_THEME})
+	end
 	self.theme = theme
 	self:_setFont(theme.font, theme.fontSize)
 	RECTSHADER:send("bordercolor", theme.borderColor)
@@ -329,11 +341,18 @@ function mimic:_buildAtlas()
 	self.atlasQuads = quads
 end
 
+local function _regenPanelSpriteBatches(panel)
+	panel.spriteBatch:release()
+	panel.spriteBatch = gfx.newSpriteBatch(self.atlas)
+	panel.quadDirty = true
+	for _, child in ipairs(panel.children) do
+		_regenPanelSpriteBatches(child)
+	end
+end
+
 function mimic:_regenSpriteBatches()
 	for _, window in ipairs(self.windows) do
-		window.spriteBatch:release()
-		window.spriteBatch = gfx.newSpriteBatch(self.atlas)
-		window.quadDirty = true
+		_regenPanelSpriteBatches(window)
 	end
 end
 
@@ -347,11 +366,16 @@ function mimic:init(theme)
 	self.liveWindow = false --the window currently being modified
 	self.windowStack = {} --sorted list used for drawing
 	self.windowStackMap = {} --LUT used to avoid looping over windowStack
+	self.panelStack = {}
+	self.livePanel = false
+	self.idStack = {}
+	self.idPrefix = ""
 
 	--input
 	self.hoverWindow = false --the upper-most (z) window the mouse is over
 	self.activeWindow = false --the window last clicked on
 	self.activeControl = false --the control under the mouse during a press
+	self.hoverPanel = false --the inner-most panel of the hoverWindow the mouse is over
 	self.absoluteMousex = 0 --window-space mouse
 	self.absoluteMousey = 0
 	self.mousex = 0 --adjusted mouse, relative to liveWindow
@@ -369,7 +393,14 @@ function mimic:init(theme)
 	self:_setTheme(theme or DEFAULT_THEME)
 end
 
+local function checkPanelHover(panel, x, y)
+	if overlaps(x, y, panel.w, panel.h) then
+
+	end
+end
+
 function mimic:update()
+
 	--false is a valid arg, so check explicitly for nil
 	if self.pendingTheme ~= nil then
 		self:_setTheme(self.pendingTheme)
@@ -413,6 +444,47 @@ function mimic:update()
 
 	::skipsort::
 	self.hoverWindow = hover
+
+	-- --update hover panel
+	-- if hover then
+
+	-- end
+end
+
+-- local function _drawPanel(instMesh, instCount, text, spriteBatch)
+-- 	gfx.setShader(RECTSHADER)
+-- 	RECTSHADER:send("windowpos", WINDOWPOS)
+-- 	RECT_MESH:attachAttribute("instanceBody", instMesh, "perinstance")
+-- 	RECT_MESH:attachAttribute("instanceColor", instMesh, "perinstance")
+-- 	RECT_MESH:attachAttribute("instanceBorder", instMesh, "perinstance")
+-- 	gfx.drawInstanced(RECT_MESH, instCount)
+-- 	gfx.setShader()
+-- 	gfx.draw(text)
+-- 	gfx.setBlendMode("alpha", "premultiplied")
+-- 	gfx.draw(spriteBatch)
+-- 	gfx.setBlendMode("alpha", "alphamultiply")
+-- end
+
+local function _drawPanel(panel)
+	gfx.push()
+	gfx.translate(panel.x, panel.y + panel.scrolly)
+
+	gfx.setShader(RECTSHADER)
+	RECTSHADER:send("windowpos", WINDOWPOS)
+	RECT_MESH:attachAttribute("instanceBody", panel.instMesh, "perinstance")
+	RECT_MESH:attachAttribute("instanceColor", panel.instMesh, "perinstance")
+	RECT_MESH:attachAttribute("instanceBorder", panel.instMesh, "perinstance")
+	gfx.drawInstanced(RECT_MESH, panel.instCount)
+	gfx.setShader()
+	gfx.draw(panel.text)
+	gfx.setBlendMode("alpha", "premultiplied")
+	gfx.draw(panel.spriteBatch)
+	gfx.setBlendMode("alpha", "alphamultiply")
+
+	for _, child in ipairs(panel.children) do
+		_drawPanel(child)
+	end
+	gfx.pop()
 end
 
 function mimic:draw()
@@ -421,22 +493,8 @@ function mimic:draw()
 	
 	for n = 1, #self.windowStack do
 		local window = self.windowStack[n]
-		love.graphics.push()
-		love.graphics.translate(window.x, window.y)
-		gfx.setShader(RECTSHADER)
-		RECTSHADER:send("windowpos", WINDOWPOS)
-		RECT_MESH:attachAttribute("instanceBody", window.instMesh, "perinstance")
-		RECT_MESH:attachAttribute("instanceColor", window.instMesh, "perinstance")
-		RECT_MESH:attachAttribute("instanceBorder", window.instMesh, "perinstance")
-		gfx.drawInstanced(RECT_MESH, window.instMax)
-		gfx.setShader()
+		_drawPanel(window)
 
-		gfx.draw(window.text)
-		gfx.setBlendMode("alpha", "premultiplied")
-		gfx.draw(window.spriteBatch)
-		gfx.setBlendMode("alpha", "alphamultiply")
-
-		love.graphics.pop()
 
 		-- gfx.print(window.sortingCoef, window.x, window.y-40)
 		-- gfx.print(window.quadCount, window.x, window.y-40)
@@ -490,6 +548,24 @@ function mimic:mousereleased(x, y, btn, istouch, presses)
 end
 
 function mimic:wheelmoved(x, y)
+	local window = self.activeWindow
+	if window then
+		window.scrolly = window.scrolly + y
+	end
+end
+
+-------------------------------------------------------------------------------
+-- ID Stack
+-------------------------------------------------------------------------------
+
+function mimic:pushID(id)
+	insert(self.idStack, id)
+	self.idPrefix = concat(self.idStack, ">")
+end
+
+function mimic:popID(id)
+	remove(self.idStack, #self.idStack)
+	self.idPrefix = concat(self.idStack, ">")
 end
 
 -------------------------------------------------------------------------------
@@ -512,7 +588,8 @@ function mimic:_mkRect(id, x, y, w, h, color, border)
 		self.cache[id] = rect
 
 		--this is a new rect, so dirty and return
-		self.liveWindow.instDirty = true
+		self.livePanel.instDirty = true
+
 		return rect
 	end
 
@@ -533,29 +610,29 @@ function mimic:_mkRect(id, x, y, w, h, color, border)
 	rect[8] = color[4]
 	rect[9] = border
 
-	self.liveWindow.instDirty = true
+	self.livePanel.instDirty = true
 	return rect
 end
 
 --add a rect instance to the live window, and return it
 function mimic:_addRect(rect)
 	-- do return end
-	local window = self.liveWindow
-	local i = window.instIndex
-	local list = window.instList
+	local panel = self.livePanel
+	local i = panel.instIndex
+	local list = panel.instList
 
 	--check to see if we need to set the dirty flag
 	--(whether the draw list differs from last frame)
-	if (not window.instDirty) and list[i] ~= rect then
-		window.instDirty = true
+	if (not panel.instDirty) and list[i] ~= rect then
+		panel.instDirty = true
 	end
 
 	list[i] = rect
-	window.instIndex = i + 1
+	panel.instIndex = i + 1
 
 	--if the vert index exceeds the buffer size, we need to make a new mesh
 	--and expand the instance list
-	if i > window.instMax then
+	if i > panel.instMax then
 		--[[
 			Here we add the initial buffer size, so the vertex buffer increases
 			in 'blocks' of the initial size.
@@ -563,14 +640,14 @@ function mimic:_addRect(rect)
 			An alternative worth trying is the Lua table method of doubling
 			the size each time it is recreated
 		]]
-		window.instMax = window.instMax + BUFFER_INIT_SIZE
+		panel.instMax = panel.instMax + BUFFER_INIT_SIZE
 
-		for n = #list, window.instMax do
+		for n = #list, panel.instMax do
 			list[n] = ATTRIBUTE_ZERO
 		end
-		window.instMesh:release()
-		window.instMesh = gfx.newMesh(ATTRIBUTE_TABLE, list, nil, "dynamic")
-		window.instDirty = true
+		panel.instMesh:release()
+		panel.instMesh = gfx.newMesh(ATTRIBUTE_TABLE, list, nil, "dynamic")
+		panel.instDirty = true
 	end
 
 	return rect
@@ -590,7 +667,7 @@ function mimic:_mkText(id, str, x, y, color)
 	if not txt then
 		txt = {{color, str}, x, y, self.font:getWidth(str)}
 		self.cache[id] = txt
-		self.liveWindow.textDirty = true
+		self.livePanel.textDirty = true
 
 		return txt
 	end
@@ -607,25 +684,25 @@ function mimic:_mkText(id, str, x, y, color)
 	txt[3] = y
 	txt[4] = self.font:getWidth(str)
 
-	self.liveWindow.textDirty = true
+	self.livePanel.textDirty = true
 	return txt
 end
 
 --add text to the live window text object, and return it
 function mimic:_addText(txt)
 	-- do return end
-	local window = self.liveWindow
-	local i = window.textIndex
-	local list = window.textList
+	local panel = self.livePanel
+	local i = panel.textIndex
+	local list = panel.textList
 
 	--check to see if we need to set the dirty flag
 	--(whether the draw list differs from last frame)
-	if (not window.textDirty) and list[i] ~= txt then
-		window.textDirty = true
+	if (not panel.textDirty) and list[i] ~= txt then
+		panel.textDirty = true
 	end
 
 	list[i] = txt
-	window.textIndex = i + 1
+	panel.textIndex = i + 1
 
 	return txt
 end
@@ -640,7 +717,7 @@ function mimic:_mkQuad(id, spr, x, y, color)
 	if not quad then
 		quad = {self.atlasQuads[spr], x, y, color}
 		self.cache[id] = quad
-		self.liveWindow.quadDirty = true
+		self.livePanel.quadDirty = true
 		return quad
 	end
 
@@ -654,27 +731,235 @@ function mimic:_mkQuad(id, spr, x, y, color)
 	quad[3] = y
 	quad[4] = color
 
-	self.liveWindow.quadDirty = true
+	self.livePanel.quadDirty = true
 
 	return quad
 end
 
 function mimic:_addQuad(quad)
 	-- do return end
-	local window = self.liveWindow
-	local i = window.quadIndex
-	local list = window.quadList
+	local panel = self.livePanel
+	local i = panel.quadIndex
+	local list = panel.quadList
 
 	--check to see if we need to set the dirty flag
 	--(whether the draw list differs from last frame)
-	if (not window.quadDirty) and list[i] ~= quad then
-		window.quadDirty = true
+	if (not panel.quadDirty) and list[i] ~= quad then
+		panel.quadDirty = true
 	end
 
 	list[i] = quad
-	window.quadIndex = i + 1
+	panel.quadIndex = i + 1
 
 	return quad
+end
+
+-------------------------------------------------------------------------------
+-- Panels
+-------------------------------------------------------------------------------
+
+function mimic:_mkPanel(id, x, y, w, h)
+	local panel = self.cache[id]
+	if not panel then
+		panel =
+		{
+			id = id,
+			--render properties
+			x = x, --render offset
+			y = y,
+			w = w, --render size
+			h = h,
+			--scroll properties
+			canScroll = false,
+			scrollx = 0, --scroll offset
+			scrolly = 0,
+			sw = w, --scroll size (passed to scissor)
+			sh = h,
+			scrollBarx = false, --scroll bar reference
+			scrollBary = false,
+
+			--layout control
+			children = {}, --child panels
+			childIndex = 1,
+			childCount = 0,
+			nextx = 0,
+			nexty = 0,
+			treeStates = {},
+
+			--non-scrolling visuals
+			bgRect = false,
+
+			--geometry
+			instMesh = gfx.newMesh(ATTRIBUTE_TABLE, BUFFER_INIT_LIST, nil, "dynamic"),
+			instDirty = true,
+			instList = clone(BUFFER_INIT_LIST),
+			instMax = BUFFER_INIT_SIZE,
+			instIndex = 1,
+			instCount = 0,
+			
+			--text
+			text = gfx.newText(self.font),
+			textDirty = true,
+			textList = {},
+			textIndex = 1,
+			textCount = 0,
+			
+			--quads
+			spriteBatch = gfx.newSpriteBatch(self.atlas, 99),
+			quadDirty = false,
+			quadList = {},
+			quadIndex = 1,
+			quadCount = 0
+		}
+		
+		self.cache[id] = panel
+	end
+	
+	return panel
+end
+
+function mimic:_addPanel(panel)
+	local parent = self.livePanel
+	parent.children[parent.childIndex] = panel
+	parent.childIndex = parent.childIndex + 1
+end
+
+function mimic:childBegin(id, drawBorder, w, h)
+	local parent = self.livePanel
+	local pad = self.theme.padding
+	local x, y = parent.nextx, parent.nexty
+	local scrollSize = self.theme.scrollSize
+
+	--create the panel
+	local panel = self:_mkPanel(id, x, y, parent.w - scrollSize - pad, parent.h - scrollSize - pad)
+
+	--create the border if required
+	local bgRect
+	if drawBorder then
+		bgRect = self:_mkRect(id .. ">panelBorder", x, y, panel.w, panel.h, nil, true)
+		self:_addRect(bgRect)
+	end
+
+	panel.bgRect = bgRect
+	self:_addPanel(panel)
+	
+	--push the panel stack
+	insert(self.panelStack, panel)
+	self.livePanel = panel
+
+	self.mousex = self.mousex - panel.x
+	self.mousey = self.mousey - panel.y
+end
+
+function mimic:childEnd()
+	local panel = self.livePanel
+
+	--zero out unused text instances
+	if panel.textIndex - 1 ~= panel.textCount then
+		for n = panel.textIndex, panel.textCount do
+			panel.textList[n] = nil
+		end
+		panel.textDirty = true
+	end
+	
+	--refresh text if needed
+	if panel.textDirty then
+		local text = panel.text
+		local list = panel.textList
+		text:clear()
+		for n = 1, #list do
+			local txt = list[n]
+			text:add(txt[1], txt[2], txt[3])
+		end
+		panel.textDirty = false
+		print "rebuilt text"
+	end
+	
+	--zero out unused quads
+	if panel.quadIndex - 1 ~= panel.quadCount then
+		for n = panel.quadIndex, panel.quadCount do
+			panel.quadList[n] = nil
+		end
+		panel.quadDirty = true
+	end
+	
+	--refresh quads if needed
+	if panel.quadDirty then
+		local batch = panel.spriteBatch
+		local list = panel.quadList
+		batch:clear()
+		for n = 1, #list do
+			local quad = list[n]
+			batch:setColor(quad[4])
+			batch:add(quad[1], quad[2], quad[3])
+
+		end
+		panel.quadDirty = false
+		print "rebuilt batch"
+	end
+	
+	--zero out unused mesh instances
+	if panel.instIndex - 1 ~= panel.instCount then
+		for n = panel.instIndex , panel.instCount do
+			panel.instList[n] = ATTRIBUTE_ZERO
+		end
+		panel.instDirty = true
+	end
+
+	--refresh mesh if needed
+	if panel.instDirty then
+		-- panel.instList[1][4] = panel.h
+
+		--send verts
+		panel.instMesh:setVertices(panel.instList)
+		panel.instDirty = false
+		print(frame, panel.id, "rebuilt mesh")
+	end
+	
+	--zero out unused children
+	if panel.childIndex - 1 ~= panel.childCount then
+		for n = panel.childIndex, panel.childCount do
+			panel.children[n] = nil
+		end
+	end
+
+	--update parent stuff
+	local parentInstDirty
+	if panel.nexty + self.theme.padding ~= panel.h then
+		-- update the bg dimensions first
+		panel.h = panel.nexty + self.theme.padding
+		if panel.bgRect then
+			panel.bgRect[4] = panel.h
+			parentInstDirty = true
+			print "adjust bgRect"
+		end
+	end
+	-- panel.h = panel.nexty + self.theme.padding
+	local numPanels = #self.panelStack
+	local parent = self.panelStack[numPanels - 1]
+	if parent then
+		parent.nexty = parent.nexty + panel.h
+		parent.instDirty = parent.instDirty or parentInstDirty
+	end
+
+	--cleanup
+	panel.instCount = panel.instIndex - 1
+	panel.instIndex = 1
+	panel.textCount = panel.textIndex - 1
+	panel.textIndex = 1
+	panel.quadCount = panel.quadIndex - 1
+	panel.quadIndex = 1
+	panel.childCount = panel.childIndex - 1
+	panel.childIndex = 1
+	panel.nextx = 0
+	panel.nexty = 0
+
+	self.mousex = self.mousex + panel.x
+	self.mousey = self.mousey + panel.y
+
+	--pop the panel stack
+	remove(self.panelStack, numPanels)
+	self.livePanel = self.panelStack[numPanels - 1]
 end
 
 -------------------------------------------------------------------------------
@@ -682,47 +967,37 @@ end
 -------------------------------------------------------------------------------
 
 --internal helper for window creation
-function mimic:_mkWindow(id, x, y, w)
-	local window = 
-	{
-		id = id,
-		x = x,
-		y = y,
-		w = w,
-		h = 0,
-		z = 1,
-		sortingCoef = 0,
+function mimic:_mkWindow(id, x, y, w, isTransient)
+	--a window is a specialised panel
+	local window = self:_mkPanel(id, x, y, w or 0, h or 0)
+	-- local window = 
+	-- {
+	-- 	id = id,
+	-- 	x = x,
+	-- 	y = y,
+	-- 	w = w or 0,
+	-- 	h = h or 0,
+	-- 	z = 1,
+	-- 	sortingCoef = 0,
+	-- 	scrollx = 0,
+	-- 	scrolly = 0,
 		
-		--layout control
-		nextx = 0,
-		nexty = 0,
-		treeStates = {}, --transient, will reset when app closes
+	-- 	--layout control
+	-- 	nextx = 0,
+	-- 	nexty = 0,
+	-- 	treeStates = {}, --transient, will reset when app closes
 
-		--geometry
-		instMesh = gfx.newMesh(ATTRIBUTE_TABLE, BUFFER_INIT_LIST, nil, "dynamic"),
-		instDirty = true,
-		instList = clone(BUFFER_INIT_LIST),
-		instMax = BUFFER_INIT_SIZE,
-		instIndex = 1,
-		instCount = 0,
 
-		--text
-		text = gfx.newText(self.font),
-		textDirty = true,
-		textList = {},
-		textIndex = 1,
-		textCount = 0,
+	--add additional properties
+	window.z = 1
+	window.sortingCoef = 0
 
-		--quads
-		spriteBatch = gfx.newSpriteBatch(self.atlas, 99),
-		quadDirty = false,
-		quadList = {},
-		quadIndex = 1,
-		quadCount = 0
-	}
+	-- local mainPanel = self:_mkPanel(id .. ">main", 0, 0, w, h)
+	-- window.mainPanel = mainPanel
+	-- insert(window.children, mainPanel)
 
 	self.windows[id] = window
-	
+
 	return window
 end
 
@@ -734,10 +1009,10 @@ function mimic:windowBegin(str, initOptions)
 		window = self:_mkWindow(id, initOptions.x, initOptions.y, initOptions.w or 256)
 		window.isTransient = initOptions.isTransient
 	end
-
+	
 	window.sortingCoef = initOptions.alwaysOnTop and 1 or 0
 	window.sortingCoef = initOptions.alwaysOnBottom and -1 or window.sortingCoef
-
+	
 	if not self.windowStackMap[id] then
 		self.windowStackMap[id] = window
 		insert(self.windowStack, window)
@@ -746,22 +1021,26 @@ function mimic:windowBegin(str, initOptions)
 		self.activeWindow = window
 	end
 	self.liveWindow = window
-
+	
 	--mouse interactions
 	local mx, my = self.absoluteMousex, self.absoluteMousey
 	self.mousex, self.mousey = mx - window.x, my - window.y
-
+	
 	if self.mouseLeft == KEY_PRESSED and window == self.activeWindow and overlaps(mx, my, window.x, window.y, window.w, self.titleHeight) then
 		self.dragx = mx - window.x
 		self.dragy = my - window.y
 		self.dragWindow = window
 	end
+	
+	local pad = self.theme.padding
 
-	--construct header and such
+	--setup main panel
+	insert(self.panelStack, window)
+	self.livePanel = window
+
 	local bg = self:_mkRect(id, 0, 0, window.w, window.h, nil, true)
 	self:_addRect(bg)
 
-	local pad = self.theme.padding
 	local txt = self:_mkText(id .. ">headtxt", label, pad, pad)
 	local header = self:_mkRect(id .. ">head", 0, 0, window.w, self.fontHeight + pad * 2, self.theme.win_titleColor)
 
@@ -777,84 +1056,27 @@ function mimic:windowBegin(str, initOptions)
 
 
 	window.nexty = self.fontHeight + pad * 2
+	self:childBegin(id .. ">contentPanel", false, 0, window.nexty, window.w, window.h) --EDIT THIS
 end
 
 function mimic:windowEnd()
+	self:childEnd() --content panel
+
+	--[[
+		update the main panel height and set dirty flag.
+		this isn't needed, but prevents a 1-frame visual artefact
+		whereby the content shows with no background
+	]]
 	local window = self.liveWindow
-	
-	--zero out unused text instances
-	if window.textIndex - 1 ~= window.textCount then
-		for n = window.textIndex, window.textCount do
-			window.textList[n] = nil
-		end
-		window.textDirty = true
-	end
-	
-	--refresh text if needed
-	if window.textDirty then
-		local text = window.text
-		local list = window.textList
-		text:clear()
-		for n = 1, #list do
-			local txt = list[n]
-			text:add(txt[1], txt[2], txt[3])
-		end
-		window.textDirty = false
-		print "rebuilt text"
-	end
-	
-	--zero out unused quads
-	if window.quadIndex - 1 ~= window.quadCount then
-		for n = window.quadIndex, window.quadCount do
-			window.quadList[n] = nil
-		end
-		window.quadDirty = true
-	end
-	
-	--refresh quads if needed
-	if window.quadDirty then
-		local batch = window.spriteBatch
-		local list = window.quadList
-		batch:clear()
-		for n = 1, #list do
-			local quad = list[n]
-			batch:setColor(quad[4])
-			batch:add(quad[1], quad[2], quad[3])
-
-		end
-		window.quadDirty = false
-		print "rebuilt batch"
-	end
-	
-	--zero out unused mesh instances
-	if window.instIndex - 1 ~= window.instCount then
-		for n = window.instIndex , window.instCount do
-			window.instList[n] = ATTRIBUTE_ZERO
-		end
-		window.instDirty = true
-	end
-
-	--refresh mesh if needed
-	if window.instDirty or window.nexty + self.theme.padding ~= window.h then
-		--update the bg dimensions first
+	if window.h ~= window.nexty + self.theme.padding then
 		window.h = window.nexty + self.theme.padding
 		window.instList[1][4] = window.h
-
-		--send verts
-		window.instMesh:setVertices(window.instList)
-		window.instDirty = false
-		print "rebuilt mesh"
+		window.instDirty = true
+		-- print("window height refreshed", window.h)
 	end
 
-	--cleanup
-	window.instCount = window.instIndex - 1
-	window.instIndex = 1
-	window.textCount = window.textIndex - 1
-	window.textIndex = 1
-	window.quadCount = window.quadIndex - 1
-	window.quadIndex = 1
-	window.nextx = 0
-	window.nexty = 0
+	self:childEnd() --main panel
+
 	self.liveWindow = false
 end
 
@@ -884,6 +1106,7 @@ end
 
 function mimic:_isActive(id, x, y, w, h)
 	local state = BTN_UP
+	local panel = self.livePanel
 	if self.liveWindow == self.hoverWindow and overlaps(self.mousex, self.mousey, x, y, w, h) then
 		if not self.activeControl then
 			if self.mouseLeft == KEY_PRESSED then
@@ -912,15 +1135,15 @@ function mimic:text(str, ...)
 	local pad = self.theme.padding
 	-- print(label, id)
 
-	local txt = self:_mkText(id, label, self.liveWindow.nextx + pad + 2, self.liveWindow.nexty + pad)
+	local txt = self:_mkText(id, label, self.livePanel.nextx + pad + 2, self.livePanel.nexty + pad)
 	self:_addText(txt)
-	self.liveWindow.nexty = self.liveWindow.nexty + self.fontHeight + pad
+	self.livePanel.nexty = self.livePanel.nexty + self.fontHeight + pad
 end
 
 function mimic:button(str)
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
-	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local x, y = self.livePanel.nextx + pad, self.livePanel.nexty + pad --+ self.liveWindow.scrolly
 	local height = self.fontHeight + pad * 2
 
 	--text is static, and we need it's width first
@@ -944,7 +1167,7 @@ function mimic:button(str)
 	self:_addRect(bg)
 	self:_addText(txt)
 
-	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+	self.livePanel.nexty = self.livePanel.nexty + height + pad
 
 	return state == BTN_CLICK
 end
@@ -952,7 +1175,7 @@ end
 function mimic:checkBox(str, isChecked)
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
-	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local x, y = self.livePanel.nextx + pad, self.livePanel.nexty + pad
 	local height = self.fontHeight
 	local clicked
 
@@ -979,14 +1202,14 @@ function mimic:checkBox(str, isChecked)
 	-- if isChecked then
 	-- end
 
-	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+	self.livePanel.nexty = self.livePanel.nexty + height + pad
 	return state == BTN_CLICK
 end
 
 function mimic:radioButton(str, selected)
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
-	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local x, y = self.livePanel.nextx + pad, self.livePanel.nexty + pad
 	local height = self.fontHeight
 	
 	local txt = self:_mkText(id .. ">txt", label, x + height + pad, y)
@@ -1007,7 +1230,7 @@ function mimic:radioButton(str, selected)
 	self:_addQuad(radio)
 	self:_addText(txt)
 
-	self.liveWindow.nexty = self.liveWindow.nexty + height + pad
+	self.livePanel.nexty = self.livePanel.nexty + height + pad
 	return state == BTN_CLICK
 end
 
@@ -1044,11 +1267,11 @@ end
 function mimic:header(str)
 	local label, id = splitLabelId(str)
 	local pad = self.theme.padding
-	local x, y = self.liveWindow.nextx + pad, self.liveWindow.nexty + pad
+	local x, y = self.livePanel.nextx + pad, self.livePanel.nexty + pad
 	local height = self.fontHeight
-	local width = self.liveWindow.w
+	local width = self.livePanel.w
 
-	local expand = self.liveWindow.treeStates[id]
+	local expand = self.livePanel.treeStates[id]
 	if expand == nil then
 		expand = false
 	end
@@ -1057,7 +1280,7 @@ function mimic:header(str)
 		expand = not expand
 	end
 
-	self.liveWindow.treeStates[id] = expand
+	self.livePanel.treeStates[id] = expand
 
 	local rect = self:_mkRect(id, x - pad, y, width, height + pad * 2, self.theme.win_titleColor)
 	local quad = self:_mkQuad(id .. ">tri", expand and 6 or 5, x + pad, y + pad + math.floor(height /10))
