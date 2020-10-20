@@ -393,9 +393,17 @@ function mimic:init(theme)
 	self:_setTheme(theme or DEFAULT_THEME)
 end
 
-local function checkPanelHover(panel, x, y)
-	if overlaps(x, y, panel.w, panel.h) then
-
+local function checkPanelHover(panel, mx, my, x, y)
+	x = x + panel.x
+	y = y + panel.y
+	if overlaps(mx, my, x, y, panel.w, panel.h) then
+		for _, child in ipairs(panel.children) do
+			local hover = checkPanelHover(child, mx, my, x, y)
+			if hover then
+				return hover
+			end
+		end
+		return panel
 	end
 end
 
@@ -433,22 +441,17 @@ function mimic:update()
 			if self.mouseLeft == KEY_PRESSED then
 				window.z = count + 1
 				self.activeWindow = window
-				goto done
+				self:_sortWindowStack()
+				break
 			end
 		end
 	end
-	goto skipsort
 
-	::done::
-	self:_sortWindowStack()
-
-	::skipsort::
 	self.hoverWindow = hover
 
-	-- --update hover panel
-	-- if hover then
+	--update hover panel
+	self.hoverPanel = hover and checkPanelHover(hover, x, y, 0, 0)
 
-	-- end
 end
 
 -- local function _drawPanel(instMesh, instCount, text, spriteBatch)
@@ -502,6 +505,8 @@ function mimic:draw()
 	end
 
 	gfx.draw(self.atlas, 0, 100)
+	gfx.print(self.hoverPanel and self.hoverPanel.id or "none", 300, 1)
+	
 end
 
 function mimic:mousemoved(x, y, dx, dy, istouch)
